@@ -33,6 +33,7 @@ import {
   Code as DeveloperIcon,
   Send as BetaTagIcon,
   GridOn as MatrixIcon,
+  TrackChanges as TrackIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 
@@ -65,6 +66,7 @@ const Layout = ({ children }) => {
     { text: 'Beta Tag İsteği', icon: <BetaTagIcon />, path: '/beta-tag-request' },
     { text: 'Hotfix Request', icon: <BugReportIcon />, path: '/hotfix-request' },
     { text: 'Servis Versiyon Matrisi', icon: <MatrixIcon />, path: '/service-version-matrix' },
+    { text: 'Müşteri Release Takibi', icon: <TrackIcon />, path: '/customer-release-track' },
   ];
 
   const toggleDrawer = () => {

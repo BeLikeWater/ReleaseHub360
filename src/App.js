@@ -20,6 +20,7 @@ import HotfixRequest from './components/HotfixRequest';
 import HotfixRequestApproval from './components/HotfixRequestApproval';
 import VersionLifecycle from './components/VersionLifecycle';
 import ServiceVersionMatrix from './components/ServiceVersionMatrix';
+import CustomerReleaseTrack from './components/CustomerReleaseTrack';
 
 const theme = createTheme({
   palette: {
@@ -80,6 +81,7 @@ function App() {
             <Route path="/hotfix-request-approval" element={<HotfixRequestApproval />} />
             <Route path="/version-lifecycle" element={<VersionLifecycle />} />
             <Route path="/service-version-matrix" element={<ServiceVersionMatrix />} />
+            <Route path="/customer-release-track" element={<CustomerReleaseTrack />} />
           </Routes>
         </Layout>
       </Router>
