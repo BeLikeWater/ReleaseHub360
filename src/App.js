@@ -21,6 +21,9 @@ import HotfixRequestApproval from './components/HotfixRequestApproval';
 import VersionLifecycle from './components/VersionLifecycle';
 import ServiceVersionMatrix from './components/ServiceVersionMatrix';
 import CustomerReleaseTrack from './components/CustomerReleaseTrack';
+import CustomerServiceMapping from './components/CustomerServiceMapping';
+import CustomerManagement from './components/CustomerManagement';
+import ProductManagement from './components/ProductManagement';
 
 const theme = createTheme({
   palette: {
@@ -80,8 +83,11 @@ function App() {
             <Route path="/hotfix-request" element={<HotfixRequest />} />
             <Route path="/hotfix-request-approval" element={<HotfixRequestApproval />} />
             <Route path="/version-lifecycle" element={<VersionLifecycle />} />
-            <Route path="/service-version-matrix" element={<ServiceVersionMatrix />} />
-            <Route path="/customer-release-track" element={<CustomerReleaseTrack />} />
+        <Route path="/service-version-matrix" element={<ServiceVersionMatrix />} />
+        <Route path="/customer-release-track" element={<CustomerReleaseTrack />} />
+        <Route path="/customer-service-mapping" element={<CustomerServiceMapping />} />
+        <Route path="/customer-management" element={<CustomerManagement />} />
+        <Route path="/product-management" element={<ProductManagement />} />
           </Routes>
         </Layout>
       </Router>

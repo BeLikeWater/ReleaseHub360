@@ -34,6 +34,9 @@ import {
   Send as BetaTagIcon,
   GridOn as MatrixIcon,
   TrackChanges as TrackIcon,
+  Link as LinkIcon,
+  Business as BusinessIcon,
+  Inventory as ProductIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 
@@ -55,11 +58,14 @@ const Layout = ({ children }) => {
   ];
 
   const releaseManagementItems = [
+    { text: 'Müşteri Yönetimi', icon: <BusinessIcon />, path: '/customer-management' },
+    { text: 'Ürün Yönetimi', icon: <ProductIcon />, path: '/product-management' },
     { text: 'Release Takvimi', icon: <CalendarIcon />, path: '/release-calendar' },
     { text: 'Release Health Check', icon: <HealthIcon />, path: '/release-health-check' },
     { text: 'Pipeline Status', icon: <PipelineIcon />, path: '/pipeline-status' },
     { text: 'Versiyon Yaşam Döngüsü', icon: <PipelineIcon />, path: '/version-lifecycle' },
     { text: 'Hotfix Request Approval', icon: <BugReportIcon />, path: '/hotfix-request-approval' },
+    { text: 'Müşteri - Servis İlişkilendirme', icon: <LinkIcon />, path: '/customer-service-mapping' },
   ];
 
   const developerDashboardItems = [
