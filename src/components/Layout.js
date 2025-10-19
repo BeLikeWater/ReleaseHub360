@@ -39,6 +39,7 @@ import {
   Inventory as ProductIcon,
   Settings as SettingsIcon,
   ChecklistRtl as TodoCheckIcon,
+  Warning as UrgentIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 
@@ -59,12 +60,13 @@ const Layout = ({ children }) => {
     { text: 'Müşteri Yönetimi', icon: <BusinessIcon />, path: '/customer-management' },
     { text: 'Ürün Yönetimi', icon: <ProductIcon />, path: '/product-management' },
     { text: 'Release Takvimi', icon: <CalendarIcon />, path: '/release-calendar' },
+    { text: 'Release ToDo Yönetimi', icon: <TodoCheckIcon />, path: '/release-todo-management' },
+    { text: 'Urgent Changes Yönetimi', icon: <UrgentIcon />, path: '/urgent-changes-management' },
   ];
 
   const releaseManagementItems = [
     { text: 'Release Health Check', icon: <HealthIcon />, path: '/release-health-check' },
     { text: 'Versiyon Yaşam Döngüsü', icon: <PipelineIcon />, path: '/pipeline-status' },
-    { text: 'Release ToDo Yönetimi', icon: <TodoCheckIcon />, path: '/release-todo-management' },
     { text: 'Hotfix Request Approval', icon: <BugReportIcon />, path: '/hotfix-request-approval' },
     { text: 'Müşteri - Servis İlişkilendirme', icon: <LinkIcon />, path: '/customer-service-mapping' },
   ];

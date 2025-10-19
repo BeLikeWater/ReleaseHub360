@@ -25,6 +25,7 @@ import CustomerServiceMapping from './components/CustomerServiceMapping';
 import CustomerManagement from './components/CustomerManagement';
 import ProductManagement from './components/ProductManagement';
 import ReleaseTodoManagement from './components/ReleaseTodoManagement';
+import UrgentChangesManagement from './components/UrgentChangesManagement';
 
 const theme = createTheme({
   palette: {
@@ -90,6 +91,7 @@ function App() {
         <Route path="/customer-management" element={<CustomerManagement />} />
         <Route path="/product-management" element={<ProductManagement />} />
         <Route path="/release-todo-management" element={<ReleaseTodoManagement />} />
+        <Route path="/urgent-changes-management" element={<UrgentChangesManagement />} />
           </Routes>
         </Layout>
       </Router>
