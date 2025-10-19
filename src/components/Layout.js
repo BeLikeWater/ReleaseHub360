@@ -37,12 +37,15 @@ import {
   Link as LinkIcon,
   Business as BusinessIcon,
   Inventory as ProductIcon,
+  Settings as SettingsIcon,
+  ChecklistRtl as TodoCheckIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 
 const Layout = ({ children }) => {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [releaseManagementOpen, setReleaseManagementOpen] = useState(false);
+  const [definitionsOpen, setDefinitionsOpen] = useState(false);
   const [developerDashboardOpen, setDeveloperDashboardOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -50,20 +53,18 @@ const Layout = ({ children }) => {
   const menuItems = [
     { text: 'Ana Sayfa', icon: <HomeIcon />, path: '/' },
     { text: 'Müşteri Dashboard', icon: <DashboardIcon />, path: '/customer-dashboard' },
-    // { text: 'Releases', icon: <ReleasesIcon />, path: '/releases' },
-    // { text: 'ToDo Listesi', icon: <TodoIcon />, path: '/todo-list' },
-    // { text: 'Değişiklik Takibi', icon: <ChangeTrackingIcon />, path: '/change-tracking' },
-    // { text: 'Hata Bildir', icon: <BugReportIcon />, path: '/report-issue' },
-    // { text: 'Release Notları', icon: <ReleaseNotesIcon />, path: '/release-notes' },
   ];
 
-  const releaseManagementItems = [
+  const definitionsItems = [
     { text: 'Müşteri Yönetimi', icon: <BusinessIcon />, path: '/customer-management' },
     { text: 'Ürün Yönetimi', icon: <ProductIcon />, path: '/product-management' },
     { text: 'Release Takvimi', icon: <CalendarIcon />, path: '/release-calendar' },
+  ];
+
+  const releaseManagementItems = [
     { text: 'Release Health Check', icon: <HealthIcon />, path: '/release-health-check' },
-    { text: 'Pipeline Status', icon: <PipelineIcon />, path: '/pipeline-status' },
-    { text: 'Versiyon Yaşam Döngüsü', icon: <PipelineIcon />, path: '/version-lifecycle' },
+    { text: 'Versiyon Yaşam Döngüsü', icon: <PipelineIcon />, path: '/pipeline-status' },
+    { text: 'Release ToDo Yönetimi', icon: <TodoCheckIcon />, path: '/release-todo-management' },
     { text: 'Hotfix Request Approval', icon: <BugReportIcon />, path: '/hotfix-request-approval' },
     { text: 'Müşteri - Servis İlişkilendirme', icon: <LinkIcon />, path: '/customer-service-mapping' },
   ];
@@ -81,6 +82,10 @@ const Layout = ({ children }) => {
 
   const handleReleaseManagementClick = () => {
     setReleaseManagementOpen(!releaseManagementOpen);
+  };
+
+  const handleDefinitionsClick = () => {
+    setDefinitionsOpen(!definitionsOpen);
   };
 
   const handleDeveloperDashboardClick = () => {
@@ -154,6 +159,36 @@ const Layout = ({ children }) => {
           {/* Release Yönetimi Alt Menü */}
           <Collapse in={releaseManagementOpen} timeout="auto" unmountOnExit>
             <List component="div" disablePadding>
+              {/* Tanımlar Alt Menüsü */}
+              <ListItem disablePadding>
+                <ListItemButton onClick={handleDefinitionsClick} sx={{ pl: 4 }}>
+                  <ListItemIcon>
+                    <SettingsIcon />
+                  </ListItemIcon>
+                  <ListItemText primary="Tanımlar" />
+                  {definitionsOpen ? <ExpandLess /> : <ExpandMore />}
+                </ListItemButton>
+              </ListItem>
+              
+              {/* Tanımlar İçeriği */}
+              <Collapse in={definitionsOpen} timeout="auto" unmountOnExit>
+                <List component="div" disablePadding>
+                  {definitionsItems.map((item) => (
+                    <ListItem key={item.text} disablePadding>
+                      <ListItemButton
+                        sx={{ pl: 8 }}
+                        selected={location.pathname === item.path}
+                        onClick={() => handleMenuClick(item.path)}
+                      >
+                        <ListItemIcon>{item.icon}</ListItemIcon>
+                        <ListItemText primary={item.text} />
+                      </ListItemButton>
+                    </ListItem>
+                  ))}
+                </List>
+              </Collapse>
+              
+              {/* Diğer Release Yönetimi Öğeleri */}
               {releaseManagementItems.map((item) => (
                 <ListItem key={item.text} disablePadding>
                   <ListItemButton

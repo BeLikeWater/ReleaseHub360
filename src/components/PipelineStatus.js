@@ -29,6 +29,7 @@ import {
   Refresh as RefreshIcon,
   PlayArrow as PlayArrowIcon,
   ArrowForward as ArrowForwardIcon,
+  Timeline as SimulationIcon,
 } from '@mui/icons-material';
 
 const PipelineStatus = () => {
@@ -170,47 +171,25 @@ const PipelineStatus = () => {
       {/* Header */}
       <Paper elevation={3} sx={{ p: 3, mb: 3, borderRadius: 2 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Button
-              startIcon={<ArrowBackIcon />}
-              onClick={() => navigate('/')}
-              variant="outlined"
-              size="small"
-            >
-              Geri
-            </Button>
-            <Box>
-              <Typography variant="h4" fontWeight="bold" color="primary.main" gutterBottom>
-                Azure Pipeline Status
-              </Typography>
-              <Typography variant="subtitle1" color="text.secondary">
-                Release pipeline durumlarını görüntüleyin
-              </Typography>
-            </Box>
+          <Box>
+            <Typography variant="h4" fontWeight="bold" color="primary.main" gutterBottom>
+              Versiyon Yaşam Döngüsü
+            </Typography>
+            <Typography variant="subtitle1" color="text.secondary">
+              Release sürecini görüntüleyin
+            </Typography>
           </Box>
           <BuildIcon sx={{ fontSize: 64, color: 'primary.main', opacity: 0.7 }} />
         </Box>
 
         <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-          <FormControl size="medium" sx={{ minWidth: 250 }}>
-            <InputLabel>Branch/Version Seç</InputLabel>
-            <Select
-              value={selectedVersion}
-              label="Branch/Version Seç"
-              onChange={(e) => setSelectedVersion(e.target.value)}
-            >
-              {versions.map(version => (
-                <MenuItem key={version} value={version}>{version}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-
           <Button
-            variant="outlined"
-            startIcon={<RefreshIcon />}
-            onClick={() => {}}
+            variant="contained"
+            startIcon={<SimulationIcon />}
+            onClick={() => navigate('/version-lifecycle')}
+            color="secondary"
           >
-            Yenile
+            Simülasyon
           </Button>
         </Box>
       </Paper>
