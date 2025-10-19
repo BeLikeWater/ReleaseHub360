@@ -19,6 +19,7 @@ import BetaTagRequest from './components/BetaTagRequest';
 import HotfixRequest from './components/HotfixRequest';
 import HotfixRequestApproval from './components/HotfixRequestApproval';
 import VersionLifecycle from './components/VersionLifecycle';
+import ServiceVersionMatrix from './components/ServiceVersionMatrix';
 
 const theme = createTheme({
   palette: {
@@ -78,6 +79,7 @@ function App() {
             <Route path="/hotfix-request" element={<HotfixRequest />} />
             <Route path="/hotfix-request-approval" element={<HotfixRequestApproval />} />
             <Route path="/version-lifecycle" element={<VersionLifecycle />} />
+            <Route path="/service-version-matrix" element={<ServiceVersionMatrix />} />
           </Routes>
         </Layout>
       </Router>
