@@ -55,46 +55,46 @@ const ServiceVersionMatrix = () => {
       id: 'customer1',
       name: 'TechCorp Solutions',
       environments: [
-        { name: 'Dev', version: 'v2.17.0', lastMailTime: new Date(Date.now() - 30 * 60000) },
-        { name: 'Test', version: 'v2.16.5', lastMailTime: new Date(Date.now() - 45 * 60000) },
-        { name: 'Preprod', version: 'v2.16.1', lastMailTime: new Date(Date.now() - 20 * 60000) },
-        { name: 'Prod', version: 'v2.15.0', lastMailTime: new Date(Date.now() - 55 * 60000) },
+        { name: 'Dev', version: 'v1.25.0', lastMailTime: new Date(Date.now() - 30 * 60000) },
+        { name: 'Test', version: 'v1.24.5', lastMailTime: new Date(Date.now() - 45 * 60000) },
+        { name: 'Preprod', version: 'v1.24.2', lastMailTime: new Date(Date.now() - 20 * 60000) },
+        { name: 'Prod', version: 'v1.24.0', lastMailTime: new Date(Date.now() - 55 * 60000) },
       ],
     },
     {
       id: 'customer2',
       name: 'Global Finance Inc',
       environments: [
-        { name: 'Test', version: 'v2.15.3', lastMailTime: new Date(Date.now() - 25 * 60000) },
-        { name: 'Preprod', version: 'v2.15.0', lastMailTime: new Date(Date.now() - 35 * 60000) },
-        { name: 'Prod', version: 'v2.14.5', lastMailTime: new Date(Date.now() - 150 * 60000) }, // 2.5 saat önce - PROBLEM!
+        { name: 'Test', version: 'v1.24.3', lastMailTime: new Date(Date.now() - 25 * 60000) },
+        { name: 'Preprod', version: 'v1.24.0', lastMailTime: new Date(Date.now() - 35 * 60000) },
+        { name: 'Prod', version: 'v1.23.5', lastMailTime: new Date(Date.now() - 150 * 60000) }, // 2.5 saat önce - PROBLEM!
       ],
     },
     {
       id: 'customer3',
       name: 'Healthcare Systems',
       environments: [
-        { name: 'Dev', version: 'v2.16.2', lastMailTime: new Date(Date.now() - 15 * 60000) },
-        { name: 'Test', version: 'v2.15.8', lastMailTime: new Date(Date.now() - 130 * 60000) }, // 2+ saat önce - PROBLEM!
-        { name: 'Prod', version: 'v2.15.2', lastMailTime: new Date(Date.now() - 40 * 60000) },
+        { name: 'Dev', version: 'v1.24.8', lastMailTime: new Date(Date.now() - 15 * 60000) },
+        { name: 'Test', version: 'v1.24.5', lastMailTime: new Date(Date.now() - 130 * 60000) }, // 2+ saat önce - PROBLEM!
+        { name: 'Prod', version: 'v1.24.0', lastMailTime: new Date(Date.now() - 40 * 60000) },
       ],
     },
     {
       id: 'customer4',
       name: 'Retail Network',
       environments: [
-        { name: 'Dev', version: 'v2.16.8', lastMailTime: new Date(Date.now() - 18 * 60000) },
-        { name: 'Test', version: 'v2.16.3', lastMailTime: new Date(Date.now() - 28 * 60000) },
-        { name: 'Preprod', version: 'v2.16.0', lastMailTime: new Date(Date.now() - 42 * 60000) },
-        { name: 'Prod', version: 'v2.15.5', lastMailTime: new Date(Date.now() - 50 * 60000) },
+        { name: 'Dev', version: 'v1.25.2', lastMailTime: new Date(Date.now() - 18 * 60000) },
+        { name: 'Test', version: 'v1.24.9', lastMailTime: new Date(Date.now() - 28 * 60000) },
+        { name: 'Preprod', version: 'v1.24.5', lastMailTime: new Date(Date.now() - 42 * 60000) },
+        { name: 'Prod', version: 'v1.24.0', lastMailTime: new Date(Date.now() - 50 * 60000) },
       ],
     },
     {
       id: 'customer5',
       name: 'Manufacturing Corp',
       environments: [
-        { name: 'Test', version: 'v2.15.9', lastMailTime: new Date(Date.now() - 33 * 60000) },
-        { name: 'Prod', version: 'v2.15.0', lastMailTime: new Date(Date.now() - 48 * 60000) },
+        { name: 'Test', version: 'v1.24.3', lastMailTime: new Date(Date.now() - 33 * 60000) },
+        { name: 'Prod', version: 'v1.24.0', lastMailTime: new Date(Date.now() - 48 * 60000) },
       ],
     },
   ];
@@ -102,7 +102,7 @@ const ServiceVersionMatrix = () => {
   // Mock Data - Servis versiyonları ve hotfix durumları
   const generateServiceVersions = () => {
     const versions = {};
-    const latestVersion = 'v2.16.0';
+    const latestVersion = 'v1.24.0';
     
     // Müşteride olmayan servisler (müşteri başına)
     const excludedServices = {
@@ -164,10 +164,10 @@ const ServiceVersionMatrix = () => {
           if (isCritical) {
             // Kritik hotfix bekliyor - Kırmızı
             status = 'critical-hotfix';
-            version = env.name === 'Prod' ? 'v2.14.5' : 'v2.15.3';
+            version = env.name === 'Prod' ? 'v1.24.0-prod.16' : 'v1.24.0-prod.18';
             hotfixes = [
-              { version: 'v2.15.0-hotfix.1', critical: true },
-              { version: 'v2.15.2-hotfix.2', critical: false },
+              { version: 'v1.24.0-prod.27', critical: true },
+              { version: 'v1.24.0-prod.28', critical: false },
             ];
           } else {
             // Rastgele durum oluştur
@@ -175,29 +175,39 @@ const ServiceVersionMatrix = () => {
             const isProd = env.name === 'Prod';
             const isTest = env.name === 'Test';
             const isDev = env.name === 'Dev';
+            const isPreprod = env.name === 'Preprod';
+            
+            // Her ortam için rastgele prod numarası üret
+            const getRandomProdNumber = () => Math.floor(Math.random() * 40) + 1;
             
             if (isDev && randomStatus < 0.75) {
               // Dev'de çoğunlukla en yeni versiyon
               status = 'current';
-              version = 'v2.17.0';
+              version = `v1.25.0-prod.${getRandomProdNumber()}`;
               hotfixes = [];
             } else if (isTest && randomStatus < 0.60) {
               // Test'te çoğunlukla güncel
               status = 'current';
-              version = latestVersion;
+              version = `v1.24.0-prod.${getRandomProdNumber()}`;
+              hotfixes = [];
+            } else if (isPreprod && randomStatus < 0.50) {
+              // Preprod'da orta seviye güncellik
+              status = 'current';
+              version = `v1.24.0-prod.${getRandomProdNumber()}`;
               hotfixes = [];
             } else if (isProd && randomStatus < 0.45) {
               // Prod'da yarısı güncel
               status = 'current';
-              version = latestVersion;
+              version = `v1.24.0-prod.${getRandomProdNumber()}`;
               hotfixes = [];
             } else {
               // Hotfix bekliyor - Sarı
+              const currentProd = getRandomProdNumber();
               status = 'pending-hotfix';
-              version = isProd ? 'v2.15.2' : 'v2.15.8';
+              version = `v1.24.0-prod.${currentProd}`;
               hotfixes = [
-                { version: 'v2.15.9-hotfix.1', critical: false },
-                { version: 'v2.15.10-hotfix.2', critical: false },
+                { version: `v1.24.0-prod.${currentProd + 1}`, critical: false },
+                { version: `v1.24.0-prod.${currentProd + 2}`, critical: false },
               ];
             }
           }
@@ -370,7 +380,7 @@ const ServiceVersionMatrix = () => {
                   borderRight: '2px solid #fff',
                   position: 'sticky',
                   left: 0,
-                  zIndex: 100,
+                  zIndex: 11,
                   top: 0,
                 }}
               >
@@ -445,8 +455,9 @@ const ServiceVersionMatrix = () => {
               <TableRow 
                 key={service}
                 sx={{ 
-                  '&:nth-of-type(odd)': { bgcolor: 'action.hover' },
-                  '&:hover': { bgcolor: 'action.selected' },
+                  '&:hover': { 
+                    bgcolor: 'rgba(0, 0, 0, 0.04)',
+                  },
                 }}
               >
                 {/* Servis adı */}
@@ -456,11 +467,14 @@ const ServiceVersionMatrix = () => {
                   sx={{
                     position: 'sticky',
                     left: 0,
-                    bgcolor: serviceIndex % 2 === 0 ? 'background.paper' : 'action.hover',
+                    bgcolor: serviceIndex % 2 === 0 ? '#fff' : '#fafafa',
                     fontWeight: 600,
                     fontSize: '0.9rem',
                     borderRight: '2px solid #e0e0e0',
-                    zIndex: 9,
+                    zIndex: 10,
+                    '&:hover': {
+                      bgcolor: serviceIndex % 2 === 0 ? '#f5f5f5' : '#eeeeee',
+                    }
                   }}
                 >
                   {service}
