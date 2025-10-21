@@ -23,9 +23,11 @@ import {
   IconButton,
   Alert,
   Snackbar,
-  Grid,
   Autocomplete,
-  Divider,
+  Stepper,
+  Step,
+  StepLabel,
+  Tooltip,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -33,7 +35,8 @@ import {
   BugReport as HotfixIcon,
   CheckCircle as CheckCircleIcon,
   PendingActions as PendingIcon,
-  Cancel as CancelIcon,
+  Science as SandboxIcon,
+  CloudUpload as PublishIcon,
 } from '@mui/icons-material';
 
 const HotfixRequest = () => {
@@ -89,7 +92,7 @@ const HotfixRequest = () => {
       workItems: [{ id: 123456, title: 'Payment gateway timeout fix' }],
       dependentHotfixes: [],
       reason: 'Kritik ödeme hatası - müşteri işlemleri durdu. Bir sonraki versiyonu bekleyemeyiz.',
-      status: 'approved',
+      status: 'published_to_customers', // waiting_approval, ready_for_pr, published_to_sandbox, waiting_release_approval, published_to_customers
     },
     {
       id: 2,
@@ -102,7 +105,7 @@ const HotfixRequest = () => {
       workItems: [],
       dependentHotfixes: [],
       reason: '',
-      status: 'pending',
+      status: 'published_to_sandbox',
     },
     {
       id: 3,
@@ -115,7 +118,20 @@ const HotfixRequest = () => {
       workItems: [{ id: 123458, title: 'Auth token expiration problem' }],
       dependentHotfixes: [{ id: 1, service: 'Core API', version: 'v6.2.0' }],
       reason: 'Token expiration hatası kullanıcı deneyimini olumsuz etkiliyor. Günlük 1000+ kullanıcı etkileniyor.',
-      status: 'pending',
+      status: 'ready_for_pr',
+    },
+    {
+      id: 4,
+      service: 'Customer Service',
+      version: 'v6.1.0',
+      isReleased: true,
+      requestedBy: 'Mehmet Kaya',
+      requestedByEmail: 'mehmet.kaya@company.com',
+      requestDate: '2025-10-20 11:30',
+      workItems: [{ id: 123457, title: 'Customer data validation issue' }],
+      dependentHotfixes: [],
+      reason: 'Müşteri veri doğrulama hatası - acil düzeltme gerekiyor.',
+      status: 'waiting_approval',
     },
   ]);
 
@@ -200,7 +216,7 @@ const HotfixRequest = () => {
       workItems: selectedWorkItems,
       dependentHotfixes: selectedDependentHotfixes,
       reason: reason,
-      status: 'pending',
+      status: 'waiting_approval',
     };
 
     setHotfixRequests([newRequest, ...hotfixRequests]);
@@ -212,42 +228,46 @@ const HotfixRequest = () => {
     handleCloseDialog();
   };
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'approved':
-        return 'success';
-      case 'pending':
-        return 'warning';
-      case 'rejected':
-        return 'error';
-      default:
-        return 'default';
-    }
+  const handlePublishToSandbox = (id) => {
+    setHotfixRequests(hotfixRequests.map(req =>
+      req.id === id ? { ...req, status: 'published_to_sandbox' } : req
+    ));
+    setSnackbar({
+      open: true,
+      message: 'Hotfix sandbox ortamına yayınlandı!',
+      severity: 'success',
+    });
   };
 
-  const getStatusText = (status) => {
-    switch (status) {
-      case 'approved':
-        return 'Onaylandı';
-      case 'pending':
-        return 'Beklemede';
-      case 'rejected':
-        return 'Reddedildi';
-      default:
-        return status;
-    }
+  const handlePublishToCustomers = (id) => {
+    setHotfixRequests(hotfixRequests.map(req =>
+      req.id === id ? { ...req, status: 'waiting_release_approval' } : req
+    ));
+    setSnackbar({
+      open: true,
+      message: 'Müşterilere yayınlama talebi gönderildi!',
+      severity: 'success',
+    });
   };
 
-  const getStatusIcon = (status) => {
+  const getStatusSteps = () => {
+    return [
+      'Waiting Approval',
+      'Ready for PR',
+      'Published to Sandbox',
+      'Waiting Release Approval',
+      'Published to Customers'
+    ];
+  };
+
+  const getActiveStep = (status) => {
     switch (status) {
-      case 'approved':
-        return <CheckCircleIcon fontSize="small" />;
-      case 'pending':
-        return <PendingIcon fontSize="small" />;
-      case 'rejected':
-        return <CancelIcon fontSize="small" />;
-      default:
-        return null;
+      case 'waiting_approval': return 0;
+      case 'ready_for_pr': return 1;
+      case 'published_to_sandbox': return 2;
+      case 'waiting_release_approval': return 3;
+      case 'published_to_customers': return 4;
+      default: return 0;
     }
   };
 
@@ -287,15 +307,14 @@ const HotfixRequest = () => {
         <TableContainer>
           <Table>
             <TableHead>
-              <TableRow>
+              <TableRow sx={{ bgcolor: '#f5f5f5' }}>
                 <TableCell><strong>Servis</strong></TableCell>
                 <TableCell><strong>Versiyon</strong></TableCell>
-                <TableCell><strong>Durum</strong></TableCell>
                 <TableCell><strong>Talep Eden</strong></TableCell>
                 <TableCell><strong>Tarih</strong></TableCell>
                 <TableCell><strong>Work Items</strong></TableCell>
-                <TableCell><strong>Bağımlı Hotfix</strong></TableCell>
-                <TableCell><strong>Status</strong></TableCell>
+                <TableCell sx={{ minWidth: 400 }}><strong>Süreç Durumu</strong></TableCell>
+                <TableCell><strong>İşlemler</strong></TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -307,7 +326,7 @@ const HotfixRequest = () => {
                     </Typography>
                   </TableCell>
                   <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Box sx={{ display: 'flex', gap: 1, flexDirection: 'column', alignItems: 'flex-start' }}>
                       <Chip
                         label={request.version}
                         size="small"
@@ -321,21 +340,8 @@ const HotfixRequest = () => {
                     </Box>
                   </TableCell>
                   <TableCell>
-                    <Chip
-                      icon={getStatusIcon(request.status)}
-                      label={getStatusText(request.status)}
-                      color={getStatusColor(request.status)}
-                      size="small"
-                    />
-                  </TableCell>
-                  <TableCell>
                     <Typography variant="body2">{request.requestedBy}</Typography>
                     <Typography variant="caption" color="text.secondary">
-                      {request.requestedByEmail}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2" color="text.secondary">
                       {request.requestDate}
                     </Typography>
                   </TableCell>
@@ -344,14 +350,15 @@ const HotfixRequest = () => {
                       request.workItems.length > 0 ? (
                         <Box>
                           {request.workItems.map((item, idx) => (
-                            <Chip
-                              key={idx}
-                              label={`#${item.id}`}
-                              size="small"
-                              sx={{ mb: 0.5, mr: 0.5 }}
-                              color="primary"
-                              variant="outlined"
-                            />
+                            <Tooltip key={idx} title={item.title}>
+                              <Chip
+                                label={`#${item.id}`}
+                                size="small"
+                                sx={{ mb: 0.5, mr: 0.5 }}
+                                color="primary"
+                                variant="outlined"
+                              />
+                            </Tooltip>
                           ))}
                         </Box>
                       ) : (
@@ -366,8 +373,11 @@ const HotfixRequest = () => {
                     )}
                   </TableCell>
                   <TableCell>
-                    {request.dependentHotfixes.length > 0 ? (
-                      <Box>
+                    {request.dependentHotfixes.length > 0 && (
+                      <Box sx={{ mb: 1 }}>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                          Bağımlılıklar:
+                        </Typography>
                         {request.dependentHotfixes.map((dep, idx) => (
                           <Chip
                             key={idx}
@@ -378,31 +388,76 @@ const HotfixRequest = () => {
                           />
                         ))}
                       </Box>
-                    ) : (
-                      <Typography variant="caption" color="text.secondary">
-                        -
-                      </Typography>
                     )}
                   </TableCell>
                   <TableCell>
-                    {request.reason && request.isReleased ? (
-                      <Typography
-                        variant="caption"
-                        sx={{
-                          maxWidth: 200,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          display: 'block',
-                        }}
-                      >
-                        {request.reason}
-                      </Typography>
-                    ) : (
-                      <Typography variant="caption" color="text.secondary" fontStyle="italic">
-                        {request.isReleased ? '-' : 'N/A (Freeze)'}
-                      </Typography>
-                    )}
+                    <Box sx={{ width: '100%', minWidth: 400 }}>
+                      <Stepper activeStep={getActiveStep(request.status)} alternativeLabel>
+                        {getStatusSteps().map((label, index) => (
+                          <Step key={label} completed={getActiveStep(request.status) > index}>
+                            <StepLabel>
+                              <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>
+                                {label}
+                              </Typography>
+                            </StepLabel>
+                          </Step>
+                        ))}
+                      </Stepper>
+                    </Box>
+                  </TableCell>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      {request.status === 'ready_for_pr' && (
+                        <Tooltip title="Sandbox ortamına yayınla">
+                          <Button
+                            size="small"
+                            variant="contained"
+                            color="info"
+                            startIcon={<SandboxIcon />}
+                            onClick={() => handlePublishToSandbox(request.id)}
+                          >
+                            Publish to Sandbox
+                          </Button>
+                        </Tooltip>
+                      )}
+                      {request.status === 'published_to_sandbox' && (
+                        <Tooltip title="Müşterilere yayınlama talebi oluştur">
+                          <Button
+                            size="small"
+                            variant="contained"
+                            color="success"
+                            startIcon={<PublishIcon />}
+                            onClick={() => handlePublishToCustomers(request.id)}
+                          >
+                            Publish to Customers
+                          </Button>
+                        </Tooltip>
+                      )}
+                      {request.status === 'waiting_approval' && (
+                        <Chip
+                          icon={<PendingIcon />}
+                          label="Onay Bekliyor"
+                          color="warning"
+                          size="small"
+                        />
+                      )}
+                      {request.status === 'waiting_release_approval' && (
+                        <Chip
+                          icon={<PendingIcon />}
+                          label="Release Manager Onayı Bekliyor"
+                          color="info"
+                          size="small"
+                        />
+                      )}
+                      {request.status === 'published_to_customers' && (
+                        <Chip
+                          icon={<CheckCircleIcon />}
+                          label="Yayınlandı"
+                          color="success"
+                          size="small"
+                        />
+                      )}
+                    </Box>
                   </TableCell>
                 </TableRow>
               ))}
@@ -430,176 +485,162 @@ const HotfixRequest = () => {
           </Box>
         </DialogTitle>
         <DialogContent dividers>
-          <Grid container spacing={3}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             {/* Talep Eden (Read-only) */}
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Talep Eden"
-                value={currentUser.email}
-                InputProps={{
-                  readOnly: true,
-                }}
-                helperText="Giriş yapmış kullanıcı bilgisi"
-              />
-            </Grid>
+            <TextField
+              fullWidth
+              label="Talep Eden"
+              value={currentUser.email}
+              InputProps={{
+                readOnly: true,
+              }}
+              helperText="Giriş yapmış kullanıcı bilgisi"
+            />
 
             {/* Servis Seçimi */}
-            <Grid item xs={12} sm={6}>
-              <FormControl fullWidth required>
-                <InputLabel>Servis</InputLabel>
-                <Select
-                  value={selectedService}
-                  label="Servis"
-                  onChange={(e) => setSelectedService(e.target.value)}
-                >
-                  {services.map((service) => (
-                    <MenuItem key={service.id} value={service.name}>
-                      {service.name}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
+            <FormControl fullWidth required>
+              <InputLabel>Servis</InputLabel>
+              <Select
+                value={selectedService}
+                label="Servis"
+                onChange={(e) => setSelectedService(e.target.value)}
+              >
+                {services.map((service) => (
+                  <MenuItem key={service.id} value={service.name}>
+                    {service.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
 
             {/* Versiyon Seçimi */}
-            <Grid item xs={12} sm={6}>
-              <FormControl fullWidth required>
-                <InputLabel>Versiyon</InputLabel>
-                <Select
-                  value={selectedVersion}
-                  label="Versiyon"
-                  onChange={(e) => setSelectedVersion(e.target.value)}
-                >
-                  {versions.map((version) => (
-                    <MenuItem key={version.id} value={version.version}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <span>{version.version}</span>
-                        <Chip
-                          label={version.isReleased ? 'Released' : 'Freeze'}
-                          size="small"
-                          color={version.isReleased ? 'success' : 'warning'}
-                        />
-                      </Box>
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
+            <FormControl fullWidth required>
+              <InputLabel>Versiyon</InputLabel>
+              <Select
+                value={selectedVersion}
+                label="Versiyon"
+                onChange={(e) => setSelectedVersion(e.target.value)}
+              >
+                {versions.map((version) => (
+                  <MenuItem key={version.id} value={version.version}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <span>{version.version}</span>
+                      <Chip
+                        label={version.isReleased ? 'Released' : 'Freeze'}
+                        size="small"
+                        color={version.isReleased ? 'success' : 'warning'}
+                      />
+                    </Box>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
 
             {/* Durum Bilgilendirmesi - Her zaman görünür */}
             {selectedVersion && (
-              <Grid item xs={12}>
-                <Alert severity={isVersionReleased(selectedVersion) ? 'warning' : 'info'}>
-                  <Typography variant="body2" fontWeight="bold">
-                    {isVersionReleased(selectedVersion) 
-                      ? '⚠️ Yayınlanmış Versiyon için Hotfix' 
-                      : 'ℹ️ Henüz Yayınlanmamış Versiyon (Freeze)'}
-                  </Typography>
-                  <Typography variant="caption">
-                    {isVersionReleased(selectedVersion)
-                      ? 'Bu versiyon zaten yayınlanmıştır. Work item, bağımlılık ve neden bilgileri zorunludur.'
-                      : 'Bu versiyon freeze aşamasındadır ancak henüz yayınlanmamıştır. Work item ve neden bilgisi gerekmez, sadece değişiklik geçişi yapılacaktır.'}
-                  </Typography>
-                </Alert>
-              </Grid>
+              <Alert severity={isVersionReleased(selectedVersion) ? 'warning' : 'info'}>
+                <Typography variant="body2" fontWeight="bold">
+                  {isVersionReleased(selectedVersion) 
+                    ? '⚠️ Yayınlanmış Versiyon için Hotfix' 
+                    : 'ℹ️ Henüz Yayınlanmamış Versiyon (Freeze)'}
+                </Typography>
+                <Typography variant="caption">
+                  {isVersionReleased(selectedVersion)
+                    ? 'Bu versiyon zaten yayınlanmıştır. Work item, bağımlılık ve neden bilgileri zorunludur.'
+                    : 'Bu versiyon freeze aşamasındadır ancak henüz yayınlanmamıştır. Work item ve neden bilgisi gerekmez, sadece değişiklik geçişi yapılacaktır.'}
+                </Typography>
+              </Alert>
             )}
 
             {/* Azure Work Item Seçimi - Her zaman görünür */}
-            <Grid item xs={12}>
-              <Autocomplete
-                multiple
-                disabled={!selectedVersion || !isVersionReleased(selectedVersion)}
-                options={workItems}
-                getOptionLabel={(option) => `#${option.id} - ${option.title}`}
-                value={selectedWorkItems}
-                onChange={(event, newValue) => setSelectedWorkItems(newValue)}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label={selectedVersion && isVersionReleased(selectedVersion) ? "Azure Work Items *" : "Azure Work Items"}
-                    placeholder="Work item seçiniz"
-                    helperText={
-                      !selectedVersion 
-                        ? "Önce versiyon seçiniz" 
-                        : isVersionReleased(selectedVersion)
-                        ? "Release note ve geliştirme takibi için gereklidir"
-                        : "Freeze versiyonlar için gerekli değildir"
-                    }
+            <Autocomplete
+              multiple
+              disabled={!selectedVersion || !isVersionReleased(selectedVersion)}
+              options={workItems}
+              getOptionLabel={(option) => `#${option.id} - ${option.title}`}
+              value={selectedWorkItems}
+              onChange={(event, newValue) => setSelectedWorkItems(newValue)}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label={selectedVersion && isVersionReleased(selectedVersion) ? "Azure Work Items *" : "Azure Work Items"}
+                  placeholder="Work item seçiniz"
+                  helperText={
+                    !selectedVersion 
+                      ? "Önce versiyon seçiniz" 
+                      : isVersionReleased(selectedVersion)
+                      ? "Release note ve geliştirme takibi için gereklidir"
+                      : "Freeze versiyonlar için gerekli değildir"
+                  }
+                />
+              )}
+              renderTags={(value, getTagProps) =>
+                value.map((option, index) => (
+                  <Chip
+                    label={`#${option.id} - ${option.title}`}
+                    {...getTagProps({ index })}
+                    color="primary"
+                    size="small"
                   />
-                )}
-                renderTags={(value, getTagProps) =>
-                  value.map((option, index) => (
-                    <Chip
-                      label={`#${option.id} - ${option.title}`}
-                      {...getTagProps({ index })}
-                      color="primary"
-                      size="small"
-                    />
-                  ))
-                }
-              />
-            </Grid>
+                ))
+              }
+            />
 
             {/* Bağımlı Hotfix Seçimi - Her zaman görünür */}
-            <Grid item xs={12}>
-              <Autocomplete
-                multiple
-                disabled={!selectedVersion || !isVersionReleased(selectedVersion)}
-                options={getAvailableDependentHotfixes()}
-                getOptionLabel={(option) => `${option.service} - ${option.version} (${option.requestedBy})`}
-                value={selectedDependentHotfixes}
-                onChange={(event, newValue) => setSelectedDependentHotfixes(newValue)}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Bağımlı Hotfixler"
-                    placeholder="Bağımlı hotfix seçiniz"
-                    helperText={
-                      !selectedVersion
-                        ? "Önce versiyon seçiniz"
-                        : isVersionReleased(selectedVersion)
-                        ? "Aynı versiyona farklı servislere açılmış hotfix requestleri"
-                        : "Freeze versiyonlar için gerekli değildir"
-                    }
+            <Autocomplete
+              multiple
+              disabled={!selectedVersion || !isVersionReleased(selectedVersion)}
+              options={getAvailableDependentHotfixes()}
+              getOptionLabel={(option) => `${option.service} - ${option.version} (${option.requestedBy})`}
+              value={selectedDependentHotfixes}
+              onChange={(event, newValue) => setSelectedDependentHotfixes(newValue)}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Bağımlı Hotfixler"
+                  placeholder="Bağımlı hotfix seçiniz"
+                  helperText={
+                    !selectedVersion
+                      ? "Önce versiyon seçiniz"
+                      : isVersionReleased(selectedVersion)
+                      ? "Aynı versiyona farklı servislere açılmış hotfix requestleri"
+                      : "Freeze versiyonlar için gerekli değildir"
+                  }
+                />
+              )}
+              renderTags={(value, getTagProps) =>
+                value.map((option, index) => (
+                  <Chip
+                    label={`${option.service} - ${option.version}`}
+                    {...getTagProps({ index })}
+                    variant="outlined"
+                    size="small"
                   />
-                )}
-                renderTags={(value, getTagProps) =>
-                  value.map((option, index) => (
-                    <Chip
-                      label={`${option.service} - ${option.version}`}
-                      {...getTagProps({ index })}
-                      variant="outlined"
-                      size="small"
-                    />
-                  ))
-                }
-                noOptionsText="Bu versiyon için başka hotfix talebi bulunamadı"
-              />
-            </Grid>
+                ))
+              }
+              noOptionsText="Bu versiyon için başka hotfix talebi bulunamadı"
+            />
 
             {/* Hotfix Nedeni - Her zaman görünür */}
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                disabled={!selectedVersion || !isVersionReleased(selectedVersion)}
-                required={selectedVersion && isVersionReleased(selectedVersion)}
-                multiline
-                rows={4}
-                label={selectedVersion && isVersionReleased(selectedVersion) ? "Hotfix Nedeni *" : "Hotfix Nedeni"}
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="Bu hotfix neden talep ediliyor? Neden bir sonraki versiyona kadar beklenemiyor?"
-                helperText={
-                  !selectedVersion
-                    ? "Önce versiyon seçiniz"
-                    : isVersionReleased(selectedVersion)
-                    ? "Aciliyet nedeni ve etki alanını detaylı açıklayınız"
-                    : "Freeze versiyonlar için gerekli değildir"
-                }
-              />
-            </Grid>
-          </Grid>
+            <TextField
+              fullWidth
+              disabled={!selectedVersion || !isVersionReleased(selectedVersion)}
+              required={selectedVersion && isVersionReleased(selectedVersion)}
+              multiline
+              rows={4}
+              label={selectedVersion && isVersionReleased(selectedVersion) ? "Hotfix Nedeni *" : "Hotfix Nedeni"}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Bu hotfix neden talep ediliyor? Neden bir sonraki versiyona kadar beklenemiyor?"
+              helperText={
+                !selectedVersion
+                  ? "Önce versiyon seçiniz"
+                  : isVersionReleased(selectedVersion)
+                  ? "Aciliyet nedeni ve etki alanını detaylı açıklayınız"
+                  : "Freeze versiyonlar için gerekli değildir"
+              }
+            />
+          </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, py: 2 }}>
           <Button onClick={handleCloseDialog} variant="outlined">

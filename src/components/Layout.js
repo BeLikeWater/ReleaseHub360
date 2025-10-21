@@ -45,6 +45,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 
 const Layout = ({ children }) => {
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [customerDashboardOpen, setCustomerDashboardOpen] = useState(false);
   const [releaseManagementOpen, setReleaseManagementOpen] = useState(false);
   const [definitionsOpen, setDefinitionsOpen] = useState(false);
   const [developerDashboardOpen, setDeveloperDashboardOpen] = useState(false);
@@ -53,7 +54,17 @@ const Layout = ({ children }) => {
 
   const menuItems = [
     { text: 'Ana Sayfa', icon: <HomeIcon />, path: '/' },
-    { text: 'Müşteri Dashboard', icon: <DashboardIcon />, path: '/customer-dashboard' },
+  ];
+
+  const customerDashboardItems = [
+    { text: 'Dashboard Özet', icon: <DashboardIcon />, path: '/customer-dashboard' },
+    { text: 'Release\'ler', icon: <ReleasesIcon />, path: '/releases' },
+    { text: 'Todo Listesi', icon: <TodoIcon />, path: '/todo-list' },
+    { text: 'Değişiklik Takibi', icon: <ChangeTrackingIcon />, path: '/change-tracking' },
+    { text: 'Sorun Bildir', icon: <BugReportIcon />, path: '/report-issue' },
+    { text: 'Release Notları', icon: <ReleaseNotesIcon />, path: '/release-notes' },
+    { text: 'Hotfix Yönetimi', icon: <BugReportIcon />, path: '/hotfix-management' },
+    { text: 'Urgent Changes', icon: <UrgentIcon />, path: '/urgent-changes' },
   ];
 
   const definitionsItems = [
@@ -80,6 +91,10 @@ const Layout = ({ children }) => {
 
   const toggleDrawer = () => {
     setDrawerOpen(!drawerOpen);
+  };
+
+  const handleCustomerDashboardClick = () => {
+    setCustomerDashboardOpen(!customerDashboardOpen);
   };
 
   const handleReleaseManagementClick = () => {
@@ -123,10 +138,10 @@ const Layout = ({ children }) => {
         open={drawerOpen}
         onClose={toggleDrawer}
         sx={{
-          width: 240,
+          width: 280,
           flexShrink: 0,
           '& .MuiDrawer-paper': {
-            width: 240,
+            width: 280,
             boxSizing: 'border-box',
             marginTop: '64px',
           },
@@ -138,22 +153,66 @@ const Layout = ({ children }) => {
               <ListItemButton
                 selected={location.pathname === item.path}
                 onClick={() => handleMenuClick(item.path)}
+                sx={{ py: 1 }}
               >
-                <ListItemIcon>{item.icon}</ListItemIcon>
-                <ListItemText primary={item.text} />
+                <ListItemIcon sx={{ minWidth: 40 }}>{item.icon}</ListItemIcon>
+                <ListItemText 
+                  primary={item.text}
+                  primaryTypographyProps={{ fontSize: '0.875rem' }}
+                />
               </ListItemButton>
             </ListItem>
           ))}
           
           <Divider sx={{ my: 1 }} />
           
+          {/* Müşteri Dashboard Ana Menü */}
+          <ListItem disablePadding>
+            <ListItemButton onClick={handleCustomerDashboardClick} sx={{ py: 1 }}>
+              <ListItemIcon sx={{ minWidth: 40 }}>
+                <DashboardIcon />
+              </ListItemIcon>
+              <ListItemText 
+                primary="Müşteri Dashboard" 
+                primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: 600 }}
+              />
+              {customerDashboardOpen ? <ExpandLess /> : <ExpandMore />}
+            </ListItemButton>
+          </ListItem>
+          
+          {/* Müşteri Dashboard Alt Menü */}
+          <Collapse in={customerDashboardOpen} timeout="auto" unmountOnExit>
+            <List component="div" disablePadding>
+              {customerDashboardItems.map((item) => (
+                <ListItem key={item.text} disablePadding>
+                  <ListItemButton
+                    sx={{ pl: 3, py: 0.75 }}
+                    selected={location.pathname === item.path}
+                    onClick={() => handleMenuClick(item.path)}
+                  >
+                    <ListItemIcon sx={{ minWidth: 36 }}>{item.icon}</ListItemIcon>
+                    <ListItemText 
+                      primary={item.text}
+                      primaryTypographyProps={{ fontSize: '0.8125rem' }}
+                    />
+                  </ListItemButton>
+                </ListItem>
+              ))}
+            </List>
+          </Collapse>
+          
+          <Divider sx={{ my: 1 }} />
+          
           {/* Release Yönetimi Ana Menü */}
           <ListItem disablePadding>
-            <ListItemButton onClick={handleReleaseManagementClick}>
-              <ListItemIcon>
+            <ListItemButton onClick={handleReleaseManagementClick} sx={{ py: 1 }}>
+              <ListItemIcon sx={{ minWidth: 40 }}>
                 <ReleaseManagementIcon />
               </ListItemIcon>
-              <ListItemText primary="Release Yönetimi" />
+              <ListItemText 
+                primary="Release Yönetimi" 
+                primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: 600 }}
+              />
               {releaseManagementOpen ? <ExpandLess /> : <ExpandMore />}
             </ListItemButton>
           </ListItem>
@@ -163,12 +222,15 @@ const Layout = ({ children }) => {
             <List component="div" disablePadding>
               {/* Tanımlar Alt Menüsü */}
               <ListItem disablePadding>
-                <ListItemButton onClick={handleDefinitionsClick} sx={{ pl: 4 }}>
-                  <ListItemIcon>
-                    <SettingsIcon />
+                <ListItemButton onClick={handleDefinitionsClick} sx={{ pl: 3, py: 0.75 }}>
+                  <ListItemIcon sx={{ minWidth: 36 }}>
+                    <SettingsIcon fontSize="small" />
                   </ListItemIcon>
-                  <ListItemText primary="Tanımlar" />
-                  {definitionsOpen ? <ExpandLess /> : <ExpandMore />}
+                  <ListItemText 
+                    primary="Tanımlar" 
+                    primaryTypographyProps={{ fontSize: '0.8125rem', fontWeight: 500 }}
+                  />
+                  {definitionsOpen ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}
                 </ListItemButton>
               </ListItem>
               
@@ -178,12 +240,15 @@ const Layout = ({ children }) => {
                   {definitionsItems.map((item) => (
                     <ListItem key={item.text} disablePadding>
                       <ListItemButton
-                        sx={{ pl: 8 }}
+                        sx={{ pl: 6, py: 0.5 }}
                         selected={location.pathname === item.path}
                         onClick={() => handleMenuClick(item.path)}
                       >
-                        <ListItemIcon>{item.icon}</ListItemIcon>
-                        <ListItemText primary={item.text} />
+                        <ListItemIcon sx={{ minWidth: 32 }}>{item.icon}</ListItemIcon>
+                        <ListItemText 
+                          primary={item.text}
+                          primaryTypographyProps={{ fontSize: '0.8125rem' }}
+                        />
                       </ListItemButton>
                     </ListItem>
                   ))}
@@ -194,12 +259,15 @@ const Layout = ({ children }) => {
               {releaseManagementItems.map((item) => (
                 <ListItem key={item.text} disablePadding>
                   <ListItemButton
-                    sx={{ pl: 4 }}
+                    sx={{ pl: 3, py: 0.75 }}
                     selected={location.pathname === item.path}
                     onClick={() => handleMenuClick(item.path)}
                   >
-                    <ListItemIcon>{item.icon}</ListItemIcon>
-                    <ListItemText primary={item.text} />
+                    <ListItemIcon sx={{ minWidth: 36 }}>{item.icon}</ListItemIcon>
+                    <ListItemText 
+                      primary={item.text}
+                      primaryTypographyProps={{ fontSize: '0.8125rem' }}
+                    />
                   </ListItemButton>
                 </ListItem>
               ))}
@@ -210,11 +278,14 @@ const Layout = ({ children }) => {
 
           {/* Geliştirici Dashboard Ana Menü */}
           <ListItem disablePadding>
-            <ListItemButton onClick={handleDeveloperDashboardClick}>
-              <ListItemIcon>
+            <ListItemButton onClick={handleDeveloperDashboardClick} sx={{ py: 1 }}>
+              <ListItemIcon sx={{ minWidth: 40 }}>
                 <DeveloperIcon />
               </ListItemIcon>
-              <ListItemText primary="Geliştirici Dashboard" />
+              <ListItemText 
+                primary="Geliştirici Dashboard" 
+                primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: 600 }}
+              />
               {developerDashboardOpen ? <ExpandLess /> : <ExpandMore />}
             </ListItemButton>
           </ListItem>
@@ -225,12 +296,15 @@ const Layout = ({ children }) => {
               {developerDashboardItems.map((item) => (
                 <ListItem key={item.text} disablePadding>
                   <ListItemButton
-                    sx={{ pl: 4 }}
+                    sx={{ pl: 3, py: 0.75 }}
                     selected={location.pathname === item.path}
                     onClick={() => handleMenuClick(item.path)}
                   >
-                    <ListItemIcon>{item.icon}</ListItemIcon>
-                    <ListItemText primary={item.text} />
+                    <ListItemIcon sx={{ minWidth: 36 }}>{item.icon}</ListItemIcon>
+                    <ListItemText 
+                      primary={item.text}
+                      primaryTypographyProps={{ fontSize: '0.8125rem' }}
+                    />
                   </ListItemButton>
                 </ListItem>
               ))}
