@@ -54,38 +54,38 @@ const Releases = () => {
   const releases = [
     {
       id: 1,
-      name: 'NG-3.0.0.251017.01',
-      version: 'v6.2.1',
-      tag: 'NG-3.0.0.251017.01',
-      branch: 'master',
+      name: 'Release-5',
+      version: 'v1.25.0',
+      tag: 'Release-5',
+      branch: 'release/v1.25.0',
       createdDate: '2025-10-17T15:13:52',
       environments: {
-        'Dev': { status: 'success', date: '2025-10-17T15:20:00' },
-        'Test': { status: 'success', date: '2025-10-17T15:45:00' },
-        'PreProd': { status: 'pending', date: null },
+        'Dev': { status: 'pending', date: null },
+        'Test': { status: 'not-started', date: null },
+        'PreProd': { status: 'not-started', date: null },
         'Prod': { status: 'not-started', date: null }
       }
     },
     {
       id: 2,
-      name: 'NG-3.0.0.251016.01',
-      version: 'v6.2.0',
-      tag: 'NG-3.0.0.251016.01',
-      branch: 'master',
+      name: 'Release-4',
+      version: 'v1.24.0',
+      tag: 'Release-4',
+      branch: 'release/v1.24.0',
       createdDate: '2025-10-16T14:25:30',
       environments: {
-        'Dev': { status: 'success', date: '2025-10-16T14:30:00' },
-        'Test': { status: 'failed', date: '2025-10-16T15:00:00' },
+        'Dev': { status: 'pending', date: null },
+        'Test': { status: 'not-started', date: null },
         'PreProd': { status: 'not-started', date: null },
         'Prod': { status: 'not-started', date: null }
       }
     },
     {
       id: 3,
-      name: 'NG-3.0.0.251015.01',
-      version: 'v6.1.5',
-      tag: 'NG-3.0.0.251015.01',
-      branch: 'master',
+      name: 'Release-3',
+      version: 'v1.23.0',
+      tag: 'Release-3',
+      branch: 'release/v1.23.0',
       createdDate: '2025-10-15T11:45:15',
       environments: {
         'Dev': { status: 'success', date: '2025-10-15T12:00:00' },
@@ -96,35 +96,35 @@ const Releases = () => {
     },
     {
       id: 4,
-      name: 'NG-3.0.0.251014.01',
-      version: 'v6.1.0',
-      tag: 'NG-3.0.0.251014.01',
-      branch: 'master',
+      name: 'Release-2',
+      version: 'v1.22.0',
+      tag: 'Release-2',
+      branch: 'release/v1.22.0',
       createdDate: '2025-10-14T09:15:45',
       environments: {
         'Dev': { status: 'success', date: '2025-10-14T09:30:00' },
         'Test': { status: 'success', date: '2025-10-14T10:00:00' },
-        'PreProd': { status: 'pending', date: null },
-        'Prod': { status: 'not-started', date: null }
+        'PreProd': { status: 'success', date: '2025-10-14T11:00:00' },
+        'Prod': { status: 'success', date: '2025-10-14T12:00:00' }
       }
     },
     {
       id: 5,
-      name: 'NG-3.0.0.251013.01',
-      version: 'v6.0.8',
-      tag: 'NG-3.0.0.251013.01',
-      branch: 'master',
+      name: 'Release-1',
+      version: 'v1.21.0',
+      tag: 'Release-1',
+      branch: 'release/v1.21.0',
       createdDate: '2025-10-13T16:30:20',
       environments: {
         'Dev': { status: 'success', date: '2025-10-13T16:45:00' },
-        'Test': { status: 'failed', date: '2025-10-13T17:15:00' },
-        'PreProd': { status: 'not-started', date: null },
-        'Prod': { status: 'not-started', date: null }
+        'Test': { status: 'success', date: '2025-10-13T17:15:00' },
+        'PreProd': { status: 'success', date: '2025-10-13T18:00:00' },
+        'Prod': { status: 'success', date: '2025-10-13T19:00:00' }
       }
     }
   ];
 
-  const versions = ['all', 'v6.2.1', 'v6.2.0', 'v6.1.5', 'v6.1.0'];
+  const versions = ['all', 'v1.25.0', 'v1.24.0', 'v1.23.0', 'v1.22.0'];
   const environments = ['Dev', 'Test', 'PreProd', 'Prod'];
 
   const filteredReleases = selectedVersion === 'all' 

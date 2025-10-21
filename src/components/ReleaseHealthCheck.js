@@ -103,35 +103,35 @@ const ReleaseHealthCheck = () => {
   const releases = [
     {
       id: 1,
-      version: 'v6.2.1',
-      currentStep: 9,
+      version: 'v1.23.0',
+      currentStep: 10,
       status: 'Published',
-      startDate: '2025-09-01',
-      releaseDate: '2025-10-01'
+      startDate: '2025-07-01',
+      releaseDate: '2025-08-15'
     },
     {
       id: 2,
-      version: 'v6.3.0',
-      currentStep: 5,
-      status: 'Testing',
-      startDate: '2025-10-02',
-      releaseDate: '2025-11-01'
+      version: 'v1.24.0',
+      currentStep: 10,
+      status: 'Published',
+      startDate: '2025-08-20',
+      releaseDate: '2025-09-20'
     },
     {
       id: 3,
-      version: 'v6.4.0',
-      currentStep: 2,
-      status: 'InProgress',
-      startDate: '2025-11-02',
-      releaseDate: '2025-12-01'
+      version: 'v1.25.0',
+      currentStep: 7,
+      status: 'Testing',
+      startDate: '2025-09-25',
+      releaseDate: '2025-10-25'
     },
     {
       id: 4,
-      version: 'v7.0.0',
+      version: 'v1.26.0',
       currentStep: 1,
       status: 'InProgress',
-      startDate: '2025-12-02',
-      releaseDate: '2026-01-05'
+      startDate: '2025-10-15',
+      releaseDate: '2025-11-20'
     },
   ];
 
@@ -144,14 +144,14 @@ const ReleaseHealthCheck = () => {
     { label: 'Unreleased Changes Audit', description: 'Yayınlanmamış değişiklikler denetlendi' },
     { label: 'Lock Branches', description: 'Branch\'lar kilitlendi' },
     { label: 'Generate Changes', description: 'Değişiklik listesi oluşturuldu' },
-    { label: 'Create Prod Tag', description: 'Production tag oluşturuldu' },
+    { label: 'Create Rc Tag', description: 'Rc tag oluşturuldu' },
     { label: 'Deploy to PreProd', description: 'PreProd ortamına deploy edildi' },
     { label: 'Update Release Note Status', description: 'Release notları güncellendi' },
   ];
 
-  const [selectedVersion, setSelectedVersion] = useState('v6.3.0');
+  const [selectedVersion, setSelectedVersion] = useState('v1.25.0');
   const [currentRelease, setCurrentRelease] = useState(
-    releases.find(r => r.version === 'v6.3.0')
+    releases.find(r => r.version === 'v1.25.0')
   );
 
   // Mock pipeline data
@@ -362,13 +362,13 @@ const ReleaseHealthCheck = () => {
     failedServices: 2,
     notDeployedServices: 1,
     successServices: 7,
-    targetVersion: 'v6.3.0',
+    targetVersion: 'v1.24.0',
     services: [
       { 
         name: 'Auth Service', 
         owner: 'Ahmet Yılmaz', 
-        currentVersion: 'v6.3.0',
-        targetVersion: 'v6.3.0',
+        currentVersion: 'v1.24.0',
+        targetVersion: 'v1.24.0',
         podStatus: 'Running',
         status: 'Success',
         logs: null
@@ -376,8 +376,8 @@ const ReleaseHealthCheck = () => {
       { 
         name: 'Payment Service', 
         owner: 'Ayşe Kaya', 
-        currentVersion: 'v6.3.0',
-        targetVersion: 'v6.3.0',
+        currentVersion: 'v1.24.0',
+        targetVersion: 'v1.24.0',
         podStatus: 'CrashLoopBackOff',
         status: 'Failed',
         logs: `[ERROR] Failed to connect to database at payment-db:5432
@@ -391,17 +391,17 @@ Stack trace:
       { 
         name: 'Notification Service', 
         owner: 'Mehmet Demir', 
-        currentVersion: 'v6.2.1',
-        targetVersion: 'v6.3.0',
+        currentVersion: 'v1.23.0',
+        targetVersion: 'v1.24.0',
         podStatus: 'NotDeployed',
         status: 'NotDeployed',
-        logs: 'Deployment not started yet. Current version v6.2.1 is still running.'
+        logs: 'Deployment not started yet. Current version v1.23.0 is still running.'
       },
       { 
         name: 'User Service', 
         owner: 'Ahmet Yılmaz', 
-        currentVersion: 'v6.3.0',
-        targetVersion: 'v6.3.0',
+        currentVersion: 'v1.24.0',
+        targetVersion: 'v1.24.0',
         podStatus: 'Running',
         status: 'Success',
         logs: null
@@ -409,8 +409,8 @@ Stack trace:
       { 
         name: 'Order Service', 
         owner: 'Fatma Şahin', 
-        currentVersion: 'v6.3.0',
-        targetVersion: 'v6.3.0',
+        currentVersion: 'v1.24.0',
+        targetVersion: 'v1.24.0',
         podStatus: 'Error',
         status: 'Failed',
         logs: `[ERROR] Redis connection failed
@@ -422,8 +422,8 @@ Error: connect ECONNREFUSED 10.0.0.5:6379
       { 
         name: 'Inventory Service', 
         owner: 'Mehmet Demir', 
-        currentVersion: 'v6.3.0',
-        targetVersion: 'v6.3.0',
+        currentVersion: 'v1.24.0',
+        targetVersion: 'v1.24.0',
         podStatus: 'Running',
         status: 'Success',
         logs: null
@@ -445,8 +445,8 @@ Error: connect ECONNREFUSED 10.0.0.5:6379
         jiraId: 'PROJ-456',
         azureStatus: 'In Development',
         jiraStatus: 'In Progress',
-        version: 'v6.3.0',
-        jiraVersion: 'v6.3.0',
+        version: 'v1.24.0',
+        jiraVersion: 'v1.24.0',
         impactScope: 'Feature',
         dontNeedReleaseNote: false,
         reviewStatus: 'Pending',
@@ -463,8 +463,8 @@ Error: connect ECONNREFUSED 10.0.0.5:6379
         jiraId: 'PROJ-457',
         azureStatus: 'Testing',
         jiraStatus: 'Testing',
-        version: 'v6.3.0',
-        jiraVersion: 'v6.2.1', // Versiyon uyumsuz!
+        version: 'v1.24.0',
+        jiraVersion: 'v1.23.0', // Versiyon uyumsuz!
         impactScope: 'Feature',
         dontNeedReleaseNote: false,
         reviewStatus: 'Approved',
@@ -481,7 +481,7 @@ Error: connect ECONNREFUSED 10.0.0.5:6379
         jiraId: null,
         azureStatus: 'In Development', // Test'e gelmemiş!
         jiraStatus: null,
-        version: 'v6.3.0',
+        version: 'v1.24.0',
         jiraVersion: null,
         impactScope: 'Bug',
         dontNeedReleaseNote: false,
@@ -499,8 +499,8 @@ Error: connect ECONNREFUSED 10.0.0.5:6379
         jiraId: 'PROJ-458',
         azureStatus: 'Testing',
         jiraStatus: 'Testing',
-        version: 'v6.3.0',
-        jiraVersion: 'v6.3.0',
+        version: 'v1.24.0',
+        jiraVersion: 'v1.24.0',
         impactScope: 'Feature',
         dontNeedReleaseNote: true, // Jirası var ama işaretlenmiş!
         reviewStatus: 'Approved',
@@ -517,7 +517,7 @@ Error: connect ECONNREFUSED 10.0.0.5:6379
         jiraId: null,
         azureStatus: 'Testing',
         jiraStatus: null,
-        version: 'v6.3.0',
+        version: 'v1.24.0',
         jiraVersion: null,
         impactScope: 'Bug',
         dontNeedReleaseNote: false,
@@ -537,13 +537,13 @@ Error: connect ECONNREFUSED 10.0.0.5:6379
     failedServices: 1,
     notDeployedServices: 2,
     successServices: 7,
-    targetVersion: 'v6.3.0',
+    targetVersion: 'v1.24.0',
     services: [
       { 
         name: 'Auth Service', 
         owner: 'Ahmet Yılmaz', 
-        currentVersion: 'v6.3.0',
-        targetVersion: 'v6.3.0',
+        currentVersion: 'v1.24.0',
+        targetVersion: 'v1.24.0',
         podStatus: 'Running',
         status: 'Success',
         logs: null
@@ -551,8 +551,8 @@ Error: connect ECONNREFUSED 10.0.0.5:6379
       { 
         name: 'Payment Service', 
         owner: 'Ayşe Kaya', 
-        currentVersion: 'v6.3.0',
-        targetVersion: 'v6.3.0',
+        currentVersion: 'v1.24.0',
+        targetVersion: 'v1.24.0',
         podStatus: 'Running',
         status: 'Success',
         logs: null
@@ -560,17 +560,17 @@ Error: connect ECONNREFUSED 10.0.0.5:6379
       { 
         name: 'Notification Service', 
         owner: 'Mehmet Demir', 
-        currentVersion: 'v6.2.1',
-        targetVersion: 'v6.3.0',
+        currentVersion: 'v1.23.0',
+        targetVersion: 'v1.24.0',
         podStatus: 'NotDeployed',
         status: 'NotDeployed',
-        logs: 'Deployment not started yet. Current version v6.2.1 is still running in PreProd.'
+        logs: 'Deployment not started yet. Current version v1.23.0 is still running in PreProd.'
       },
       { 
         name: 'User Service', 
         owner: 'Ahmet Yılmaz', 
-        currentVersion: 'v6.3.0',
-        targetVersion: 'v6.3.0',
+        currentVersion: 'v1.24.0',
+        targetVersion: 'v1.24.0',
         podStatus: 'Running',
         status: 'Success',
         logs: null
@@ -578,8 +578,8 @@ Error: connect ECONNREFUSED 10.0.0.5:6379
       { 
         name: 'Order Service', 
         owner: 'Fatma Şahin', 
-        currentVersion: 'v6.3.0',
-        targetVersion: 'v6.3.0',
+        currentVersion: 'v1.24.0',
+        targetVersion: 'v1.24.0',
         podStatus: 'Running',
         status: 'Success',
         logs: null
@@ -587,8 +587,8 @@ Error: connect ECONNREFUSED 10.0.0.5:6379
       { 
         name: 'Inventory Service', 
         owner: 'Mehmet Demir', 
-        currentVersion: 'v6.3.0',
-        targetVersion: 'v6.3.0',
+        currentVersion: 'v1.24.0',
+        targetVersion: 'v1.24.0',
         podStatus: 'Running',
         status: 'Success',
         logs: null
@@ -596,17 +596,17 @@ Error: connect ECONNREFUSED 10.0.0.5:6379
       { 
         name: 'Analytics Service', 
         owner: 'Burak Yıldız', 
-        currentVersion: 'v6.2.1',
-        targetVersion: 'v6.3.0',
+        currentVersion: 'v1.23.0',
+        targetVersion: 'v1.24.0',
         podStatus: 'NotDeployed',
         status: 'NotDeployed',
-        logs: 'Deployment pending. Waiting for approval to deploy v6.3.0 to PreProd.'
+        logs: 'Deployment pending. Waiting for approval to deploy v1.24.0 to PreProd.'
       },
       { 
         name: 'Reporting Service', 
         owner: 'Can Öztürk', 
-        currentVersion: 'v6.3.0',
-        targetVersion: 'v6.3.0',
+        currentVersion: 'v1.24.0',
+        targetVersion: 'v1.24.0',
         podStatus: 'Running',
         status: 'Success',
         logs: null
@@ -614,8 +614,8 @@ Error: connect ECONNREFUSED 10.0.0.5:6379
       { 
         name: 'Email Service', 
         owner: 'Zeynep Arslan', 
-        currentVersion: 'v6.3.0',
-        targetVersion: 'v6.3.0',
+        currentVersion: 'v1.24.0',
+        targetVersion: 'v1.24.0',
         podStatus: 'CrashLoopBackOff',
         status: 'Failed',
         logs: `[ERROR] SMTP connection failed to mail-server:587
@@ -629,8 +629,8 @@ Error: Authentication failed - Invalid credentials
       { 
         name: 'Customer Service', 
         owner: 'Zeynep Arslan', 
-        currentVersion: 'v6.3.0',
-        targetVersion: 'v6.3.0',
+        currentVersion: 'v1.24.0',
+        targetVersion: 'v1.24.0',
         podStatus: 'Running',
         status: 'Success',
         logs: null
@@ -1046,14 +1046,10 @@ Error: Authentication failed - Invalid credentials
 
   // Mock customer data
   const customers = [
-    { id: 1, name: 'Ziraat Bankası', email: 'tech@ziraatbank.com.tr', checked: true },
-    { id: 2, name: 'İş Bankası', email: 'tech@isbank.com.tr', checked: true },
-    { id: 3, name: 'Garanti BBVA', email: 'tech@garantibbva.com.tr', checked: true },
-    { id: 4, name: 'Akbank', email: 'tech@akbank.com.tr', checked: true },
-    { id: 5, name: 'Yapı Kredi', email: 'tech@yapikredi.com.tr', checked: true },
-    { id: 6, name: 'Vakıfbank', email: 'tech@vakifbank.com.tr', checked: true },
-    { id: 7, name: 'Halkbank', email: 'tech@halkbank.com.tr', checked: true },
-    { id: 8, name: 'QNB Finansbank', email: 'tech@qnbfinansbank.com.tr', checked: true },
+    { id: 1, name: 'Ziraat Katılım Bankası', email: 'tech@ziraatkatilimbank.com.tr', checked: true },
+    { id: 6, name: 'Vakıf Katılım Bankası', email: 'tech@vakifbank.com.tr', checked: true },
+    { id: 7, name: 'Halk Katılım Bankası', email: 'tech@halkkatilimbank.com.tr', checked: true },
+    { id: 8, name: 'Emlak Katılım Bankası', email: 'tech@emlakkatilimbank.com.tr', checked: true },
   ];
 
   const handleOpenLogs = (serviceName, logs) => {
@@ -2734,7 +2730,7 @@ Error: Authentication failed - Invalid credentials
           >
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', pr: 2 }}>
               <Typography variant="h6" fontWeight="bold">
-                Prod Tag Pipeline Durumu
+                Rc Tag Pipeline Durumu
               </Typography>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                 <Typography variant="body2" color="text.secondary">
@@ -2754,7 +2750,7 @@ Error: Authentication failed - Invalid credentials
           <AccordionDetails sx={{ p: 3 }}>
             {/* Description */}
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              Bu kart, Prod tag oluşturulduktan sonra tetiklenen pipeline'ların durumunu gösterir. 
+              Bu kart, Rc tag oluşturulduktan sonra tetiklenen pipeline'ların durumunu gösterir. 
               Her servis için pipeline durumu, AI agent durumu ve ilgili linkler listelenir. 
               Hata durumunda AI agent otomatik olarak sorunu analiz eder ve gerektiğinde kodu düzeltir.
             </Typography>

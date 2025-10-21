@@ -57,7 +57,7 @@ const TodoList = () => {
   const navigate = useNavigate();
   const [selectedEnvironment, setSelectedEnvironment] = useState('Dev');
   const [selectedPhase, setSelectedPhase] = useState('all');
-  const [selectedVersion, setSelectedVersion] = useState('v6.2.1');
+  const [selectedVersion, setSelectedVersion] = useState('v1.25.0');
   const [todos, setTodos] = useState([
     // Geçişten Önce
     {
@@ -66,7 +66,7 @@ const TodoList = () => {
       description: 'Production database\'in güncel backup\'ını al',
       phase: 'before',
       environments: ['Test', 'PreProd', 'Prod'],
-      versions: ['v6.2.1', 'v6.2.0', 'v6.1.5'], // Tüm versiyonlarda geçerli
+      versions: ['v1.25.0', 'v1.24.0', 'v1.23.0'], // Tüm versiyonlarda geçerli
       completionStatus: {
         'Dev': { completed: false, completedAt: null },
         'Test': { completed: true, completedAt: '2025-10-18T09:30:00' },
@@ -86,7 +86,7 @@ const TodoList = () => {
       description: 'Kullanıcılara bakım bildirimi göster',
       phase: 'before',
       environments: ['PreProd', 'Prod'],
-      versions: ['v6.2.1', 'v6.2.0', 'v6.1.5'],
+      versions: ['v1.25.0', 'v1.24.0', 'v1.23.0'],
       completionStatus: {
         'Dev': { completed: false, completedAt: null },
         'Test': { completed: false, completedAt: null },
@@ -102,7 +102,7 @@ const TodoList = () => {
       description: 'Yeni versiyon için load balancer ayarlarını doğrula',
       phase: 'before',
       environments: ['Prod'],
-      versions: ['v6.2.1', 'v6.2.0'],
+      versions: ['v1.25.0', 'v1.24.0'],
       completionStatus: {
         'Dev': { completed: false, completedAt: null },
         'Test': { completed: false, completedAt: null },
@@ -124,7 +124,7 @@ const TodoList = () => {
       description: 'v6.2.1 ile gelen yeni Redis cluster mimarisini hazırla',
       phase: 'before',
       environments: ['Test', 'PreProd', 'Prod'],
-      versions: ['v6.2.1'], // Sadece v6.2.1'de gerekli
+      versions: ['v1.25.0'], // Sadece v6.2.1'de gerekli
       completionStatus: {
         'Dev': { completed: false, completedAt: null },
         'Test': { completed: false, completedAt: null },
@@ -146,7 +146,7 @@ const TodoList = () => {
       description: 'Tüm uygulama servislerini güvenli şekilde durdur',
       phase: 'during',
       environments: ['Test', 'PreProd', 'Prod'],
-      versions: ['v6.2.1', 'v6.2.0', 'v6.1.5'],
+      versions: ['v1.25.0', 'v1.24.0', 'v1.23.0'],
       completionStatus: {
         'Dev': { completed: false, completedAt: null },
         'Test': { completed: true, completedAt: '2025-10-17T14:20:00' },
@@ -162,7 +162,7 @@ const TodoList = () => {
       description: 'Yeni versiyon için gerekli database değişikliklerini uygula',
       phase: 'during',
       environments: ['Test', 'PreProd', 'Prod'],
-      versions: ['v6.2.1', 'v6.2.0'],
+      versions: ['v1.25.0', 'v1.24.0'],
       completionStatus: {
         'Dev': { completed: false, completedAt: null },
         'Test': { completed: true, completedAt: '2025-10-17T14:35:00' },
@@ -185,7 +185,7 @@ const TodoList = () => {
       description: 'v6.2.1\'de değişen search schema için indeksleri yenile',
       phase: 'during',
       environments: ['Test', 'PreProd', 'Prod'],
-      versions: ['v6.2.1'], // Sadece v6.2.1'de gerekli
+      versions: ['v1.25.0'], // Sadece v6.2.1'de gerekli
       completionStatus: {
         'Dev': { completed: false, completedAt: null },
         'Test': { completed: false, completedAt: null },
@@ -205,7 +205,7 @@ const TodoList = () => {
       description: 'Redis cache\'i temizle ve yeniden başlat',
       phase: 'during',
       environments: ['Test', 'PreProd', 'Prod'],
-      versions: ['v6.2.1', 'v6.2.0', 'v6.1.5'],
+      versions: ['v1.25.0', 'v1.24.0', 'v1.23.0'],
       completionStatus: {
         'Dev': { completed: true, completedAt: '2025-10-16T16:45:00' },
         'Test': { completed: true, completedAt: '2025-10-17T11:15:00' },
@@ -223,7 +223,7 @@ const TodoList = () => {
       description: 'Tüm servislerin sağlıklı çalıştığını doğrula',
       phase: 'after',
       environments: ['Test', 'PreProd', 'Prod'],
-      versions: ['v6.2.1', 'v6.2.0', 'v6.1.5'],
+      versions: ['v1.25.0', 'v1.24.0', 'v1.23.0'],
       completionStatus: {
         'Dev': { completed: true, completedAt: '2025-10-16T17:10:00' },
         'Test': { completed: true, completedAt: '2025-10-17T15:00:00' },
@@ -239,7 +239,7 @@ const TodoList = () => {
       description: 'Kritik fonksiyonların çalıştığını test et',
       phase: 'after',
       environments: ['Test', 'PreProd', 'Prod'],
-      versions: ['v6.2.1', 'v6.2.0', 'v6.1.5'],
+      versions: ['v1.25.0', 'v1.24.0', 'v1.23.0'],
       completionStatus: {
         'Dev': { completed: true, completedAt: '2025-10-16T17:25:00' },
         'Test': { completed: true, completedAt: '2025-10-17T15:20:00' },
@@ -259,7 +259,7 @@ const TodoList = () => {
       description: 'Bakım modunu kapat ve kullanıcıları bilgilendir',
       phase: 'after',
       environments: ['PreProd', 'Prod'],
-      versions: ['v6.2.1', 'v6.2.0', 'v6.1.5'],
+      versions: ['v1.25.0', 'v1.24.0', 'v1.23.0'],
       completionStatus: {
         'Dev': { completed: false, completedAt: null },
         'Test': { completed: false, completedAt: null },
@@ -275,7 +275,7 @@ const TodoList = () => {
       description: 'Grafana ve diğer monitoring araçlarında anomali kontrolü',
       phase: 'after',
       environments: ['Prod'],
-      versions: ['v6.2.1', 'v6.2.0', 'v6.1.5'],
+      versions: ['v1.25.0', 'v1.24.0', 'v1.23.0'],
       completionStatus: {
         'Dev': { completed: false, completedAt: null },
         'Test': { completed: false, completedAt: null },
@@ -290,10 +290,10 @@ const TodoList = () => {
     {
       id: 13,
       title: 'Yeni API endpoint\'lerini test et',
-      description: 'v6.2.1 ile eklenen yeni API\'lerin çalışmasını doğrula',
+      description: 'v1.25.0 ile eklenen yeni API\'lerin çalışmasını doğrula',
       phase: 'after',
       environments: ['Test', 'PreProd', 'Prod'],
-      versions: ['v6.2.1'], // Sadece v6.2.1'de gerekli
+      versions: ['v1.25.0'], // Sadece v1.25.0'de gerekli
       completionStatus: {
         'Dev': { completed: false, completedAt: null },
         'Test': { completed: false, completedAt: null },
@@ -306,11 +306,172 @@ const TodoList = () => {
         { type: 'test', name: 'api_test_collection.json', size: '18 KB' },
         { type: 'document', name: 'yeni_endpoints.md', size: '5 KB' }
       ]
+    },
+    
+    // Dev ortamına özel işlemler
+    {
+      id: 14,
+      title: 'Geliştirme veritabanını güncelle',
+      description: 'Dev ortamı için migration script\'lerini çalıştır',
+      phase: 'before',
+      environments: ['Dev'],
+      versions: ['v1.25.0', 'v1.24.0', 'v1.23.0'],
+      completionStatus: {
+        'Dev': { completed: true, completedAt: '2025-10-20T08:30:00' },
+        'Test': { completed: false, completedAt: null },
+        'PreProd': { completed: false, completedAt: null },
+        'Prod': { completed: false, completedAt: null }
+      },
+      priority: 'high',
+      estimatedTime: '15 dakika',
+      attachments: [
+        { type: 'script', name: 'migration_v1.25.sql', size: '12 KB' },
+        { type: 'backup', name: 'dev_backup_pre_migration.sql', size: '4.2 MB' }
+      ]
+    },
+    {
+      id: 15,
+      title: 'Docker container\'ları yeniden oluştur',
+      description: 'Dev ortamı container\'larını yeni image ile güncelle',
+      phase: 'during',
+      environments: ['Dev'],
+      versions: ['v1.25.0', 'v1.24.0'],
+      completionStatus: {
+        'Dev': { completed: false, completedAt: null },
+        'Test': { completed: false, completedAt: null },
+        'PreProd': { completed: false, completedAt: null },
+        'Prod': { completed: false, completedAt: null }
+      },
+      priority: 'medium',
+      estimatedTime: '10 dakika',
+      attachments: [
+        { type: 'config', name: 'docker-compose.yml', size: '3 KB' },
+        { type: 'script', name: 'rebuild_containers.sh', size: '1.5 KB' }
+      ]
+    },
+    {
+      id: 16,
+      title: 'Lokal cache\'leri temizle',
+      description: 'Redis ve uygulama cache\'lerini sıfırla',
+      phase: 'during',
+      environments: ['Dev'],
+      versions: ['v1.25.0', 'v1.24.0', 'v1.23.0'],
+      completionStatus: {
+        'Dev': { completed: true, completedAt: '2025-10-21T09:15:00' },
+        'Test': { completed: false, completedAt: null },
+        'PreProd': { completed: false, completedAt: null },
+        'Prod': { completed: false, completedAt: null }
+      },
+      priority: 'low',
+      estimatedTime: '5 dakika',
+      attachments: [
+        { type: 'script', name: 'clear_cache.sh', size: '800 B' }
+      ]
+    },
+    {
+      id: 17,
+      title: 'Unit test\'leri çalıştır',
+      description: 'Tüm unit test\'lerin başarılı olduğunu doğrula',
+      phase: 'after',
+      environments: ['Dev'],
+      versions: ['v1.25.0', 'v1.24.0', 'v1.23.0'],
+      completionStatus: {
+        'Dev': { completed: false, completedAt: null },
+        'Test': { completed: false, completedAt: null },
+        'PreProd': { completed: false, completedAt: null },
+        'Prod': { completed: false, completedAt: null }
+      },
+      priority: 'critical',
+      estimatedTime: '30 dakika',
+      attachments: [
+        { type: 'test', name: 'unit_test_results.html', size: '125 KB' },
+        { type: 'report', name: 'coverage_report.pdf', size: '340 KB' }
+      ]
+    },
+    {
+      id: 18,
+      title: 'API dokümantasyonunu güncelle',
+      description: 'Swagger ve Postman collection\'ları güncelle',
+      phase: 'after',
+      environments: ['Dev'],
+      versions: ['v1.25.0'],
+      completionStatus: {
+        'Dev': { completed: false, completedAt: null },
+        'Test': { completed: false, completedAt: null },
+        'PreProd': { completed: false, completedAt: null },
+        'Prod': { completed: false, completedAt: null }
+      },
+      priority: 'medium',
+      estimatedTime: '25 dakika',
+      attachments: [
+        { type: 'document', name: 'swagger.yaml', size: '45 KB' },
+        { type: 'document', name: 'postman_collection.json', size: '78 KB' },
+        { type: 'document', name: 'api_changelog.md', size: '8 KB' }
+      ]
+    },
+    {
+      id: 19,
+      title: 'Environment variable\'ları kontrol et',
+      description: 'Dev ortamı için yeni eklenen env değişkenlerini ayarla',
+      phase: 'before',
+      environments: ['Dev'],
+      versions: ['v1.25.0', 'v1.24.0'],
+      completionStatus: {
+        'Dev': { completed: true, completedAt: '2025-10-20T07:45:00' },
+        'Test': { completed: false, completedAt: null },
+        'PreProd': { completed: false, completedAt: null },
+        'Prod': { completed: false, completedAt: null }
+      },
+      priority: 'high',
+      estimatedTime: '10 dakika',
+      attachments: [
+        { type: 'config', name: '.env.dev', size: '2 KB' },
+        { type: 'document', name: 'env_variables_guide.md', size: '6 KB' }
+      ]
+    },
+    {
+      id: 20,
+      title: 'Log seviyelerini ayarla',
+      description: 'Dev ortamı için debug log seviyesini aktif et',
+      phase: 'before',
+      environments: ['Dev'],
+      versions: ['v1.25.0', 'v1.24.0', 'v1.23.0'],
+      completionStatus: {
+        'Dev': { completed: true, completedAt: '2025-10-21T08:00:00' },
+        'Test': { completed: false, completedAt: null },
+        'PreProd': { completed: false, completedAt: null },
+        'Prod': { completed: false, completedAt: null }
+      },
+      priority: 'low',
+      estimatedTime: '5 dakika',
+      attachments: [
+        { type: 'config', name: 'log4j.properties', size: '1.5 KB' }
+      ]
+    },
+    {
+      id: 21,
+      title: 'Integration test\'leri çalıştır',
+      description: 'Mikroservisler arası entegrasyonu test et',
+      phase: 'after',
+      environments: ['Dev'],
+      versions: ['v1.25.0', 'v1.24.0'],
+      completionStatus: {
+        'Dev': { completed: false, completedAt: null },
+        'Test': { completed: false, completedAt: null },
+        'PreProd': { completed: false, completedAt: null },
+        'Prod': { completed: false, completedAt: null }
+      },
+      priority: 'critical',
+      estimatedTime: '45 dakika',
+      attachments: [
+        { type: 'test', name: 'integration_tests.zip', size: '2.1 MB' },
+        { type: 'report', name: 'integration_test_report.html', size: '180 KB' }
+      ]
     }
   ]);
 
   const environments = ['Dev', 'Test', 'PreProd', 'Prod'];
-  const versions = ['v6.2.1', 'v6.2.0', 'v6.1.5', 'v6.1.0'];
+  const versions = ['v1.25.0', 'v1.24.0', 'v1.23.0', 'v1.22.0'];
   const phases = [
     { key: 'before', label: 'Geçişten Önce', icon: <ScheduleIcon />, color: 'primary' },
     { key: 'during', label: 'Geçiş Anında', icon: <PlayArrowIcon />, color: 'warning' },

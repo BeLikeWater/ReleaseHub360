@@ -41,7 +41,7 @@ const VersionLifecycle = () => {
     preProdProcess: false,
     branch3: false,
     decisionDiamond: false,
-    bugfixBranch: false, // release/v1.0.0-prod-2 (stage 13-14)
+    bugfixBranch: false, // release/v1.0.0-rc-2 (stage 13-14)
     hotfixBranch: false, // Hotfix: release/v1.0.1 (stage 13-16)
     nextVersion: false, // release/v2.0.0 - next version card
     environmentPerVersion: false, // Environment Per Version section
@@ -103,7 +103,7 @@ const VersionLifecycle = () => {
 
   const handleDecisionClick = (path) => {
     if (path === 'bugfix') {
-      // No path - show bugfix branch (release/v1.0.0-prod-2)
+      // No path - show bugfix branch (release/v1.0.0-rc-2)
       setVisibleSteps(prev => ({ ...prev, bugfixBranch: true }));
     } else if (path === 'hotfix') {
       // Yes path - show hotfix branch (Hotfix: release/v1.0.1)
@@ -182,11 +182,11 @@ const VersionLifecycle = () => {
       },
       {
         key: 'branch3',
-        name: 'release/v1.0.0-prod-1',
+        name: 'release/v1.0.0-rc-1',
         visible: visibleSteps.branch3,
         processGroup: 'preprod',
         stages: [
-          { id: 8, name: 'release/v1.0.0-prod-1', type: 'tag' },
+          { id: 8, name: 'release/v1.0.0-rc-1', type: 'tag' },
           { id: 9, name: 'Azure Pipeline', type: 'deploy' },
           { id: 10, name: 'Docker Image', type: 'build' },
           { id: 11, name: 'K8s PreProd', type: 'deploy' },
@@ -195,11 +195,11 @@ const VersionLifecycle = () => {
       },
       {
         key: 'bugfixBranch',
-        name: 'release/v1.0.0-prod-2',
+        name: 'release/v1.0.0-rc-2',
         visible: visibleSteps.bugfixBranch,
         processGroup: 'preprod',
         stages: [
-          { id: 13, name: 'release/v1.0.0-prod-2', type: 'tag' },
+          { id: 13, name: 'release/v1.0.0-rc-2', type: 'tag' },
           { id: 14, name: 'Azure Pipeline', type: 'deploy' },
         ]
       },
@@ -209,7 +209,7 @@ const VersionLifecycle = () => {
         visible: visibleSteps.hotfixBranch,
         processGroup: 'hotfix',
         stages: [
-          { id: 13, name: 'release/v1.0.1-prod-1', type: 'tag' },
+          { id: 13, name: 'release/v1.0.1-rc-1', type: 'tag' },
           { id: 14, name: 'Azure Pipeline', type: 'deploy' },
           { id: 15, name: 'Docker Image', type: 'build' },
           { id: 16, name: 'K8s PreProd', type: 'deploy' },
@@ -730,7 +730,7 @@ const VersionLifecycle = () => {
             </Fade>
           )}
 
-          {/* BugFix Branch (release/v1.0.0-prod-2 - stage 13-14) */}
+          {/* BugFix Branch (release/v1.0.0-rc-2 - stage 13-14) */}
           {pipelineData.branches[3].visible && (
             <Grow in={pipelineData.branches[3].visible} timeout={800}>
               <Box sx={{ ml: 4, mb: 2 }}>

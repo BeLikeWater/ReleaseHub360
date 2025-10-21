@@ -31,8 +31,8 @@ const BetaTagRequest = () => {
     {
       id: 1,
       service: 'Core API',
-      previousTag: 'v6.2.0-beta.5',
-      newTag: 'v6.2.0-beta.6',
+      previousTag: 'v1.24.0-beta.5',
+      newTag: 'v1.24.0-beta.6',
       requestedBy: 'Ahmet Yılmaz',
       requestDate: '2025-10-19 10:30',
       status: 'completed',
@@ -41,8 +41,8 @@ const BetaTagRequest = () => {
     {
       id: 2,
       service: 'Payment Service',
-      previousTag: 'v6.2.0-beta.3',
-      newTag: 'v6.2.0-beta.4',
+      previousTag: 'v1.24.0-beta.3',
+      newTag: 'v1.24.0-beta.4',
       requestedBy: 'Ayşe Demir',
       requestDate: '2025-10-19 09:15',
       status: 'completed',
@@ -53,16 +53,16 @@ const BetaTagRequest = () => {
 
   // Mock servis listesi
   const services = [
-    { id: 1, name: 'Core API', currentTag: 'v6.2.0-beta.6' },
-    { id: 2, name: 'Payment Service', currentTag: 'v6.2.0-beta.4' },
-    { id: 3, name: 'Customer Service', currentTag: 'v6.2.0-beta.2' },
-    { id: 4, name: 'Auth Service', currentTag: 'v6.2.0-beta.5' },
-    { id: 5, name: 'Notification Service', currentTag: 'v6.2.0-beta.3' },
-    { id: 6, name: 'Report Service', currentTag: 'v6.2.0-beta.1' },
+    { id: 1, name: 'Core API', currentTag: 'v1.24.0-beta.6' },
+    { id: 2, name: 'Payment Service', currentTag: 'v1.24.0-beta.4' },
+    { id: 3, name: 'Customer Service', currentTag: 'v1.24.0-beta.2' },
+    { id: 4, name: 'Auth Service', currentTag: 'v1.24.0-beta.5' },
+    { id: 5, name: 'Notification Service', currentTag: 'v1.24.0-beta.3' },
+    { id: 6, name: 'Report Service', currentTag: 'v1.24.0-beta.1' },
   ];
 
   const incrementBetaTag = (currentTag) => {
-    // v6.2.0-beta.6 -> v6.2.0-beta.7
+    // v1.24.0-beta.6 -> v1.24.0-beta.7
     const match = currentTag.match(/^(.*-beta\.)(\d+)$/);
     if (match) {
       const prefix = match[1];

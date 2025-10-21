@@ -55,7 +55,7 @@ import {
 
 const ChangeTracking = () => {
   const navigate = useNavigate();
-  const [selectedVersion, setSelectedVersion] = useState('v6.2.1');
+  const [selectedVersion, setSelectedVersion] = useState('v1.24.0');
   const [modelDialog, setModelDialog] = useState({ open: false, data: null, type: null });
   const [activeTab, setActiveTab] = useState(0);
   const [expandedPanel, setExpandedPanel] = useState(false);
@@ -98,7 +98,7 @@ const ChangeTracking = () => {
     setCurrentModel(null);
   };
 
-  const versions = ['v6.2.1', 'v6.2.0', 'v6.1.5', 'v6.1.0'];
+  const versions = ['v1.24.0', 'v1.23.0', 'v1.22.0', 'v1.21.0'];
 
   // Değişiklik kategorileri
   const changeCategories = [
@@ -148,7 +148,7 @@ const ChangeTracking = () => {
 
   // Örnek değişiklik verileri
   const changesData = {
-    'v6.2.1': {
+    'v1.24.0': {
       apis: {
         added: [
           { 
@@ -475,7 +475,7 @@ const ChangeTracking = () => {
         ]
       }
     },
-    'v6.2.0': {
+    'v1.23.0': {
       // v6.2.0 için daha az değişiklik örneği
       apis: {
         added: [

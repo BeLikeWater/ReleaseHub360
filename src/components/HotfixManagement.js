@@ -57,7 +57,7 @@ import {
 const HotfixManagement = () => {
   const navigate = useNavigate();
   const [selectedEnvironment, setSelectedEnvironment] = useState('Test');
-  const [selectedVersion, setSelectedVersion] = useState('v6.2.1');
+  const [selectedVersion, setSelectedVersion] = useState('v1.25.0');
   const [dbChangesDialog, setDbChangesDialog] = useState(false);
   const [selectedHotfix, setSelectedHotfix] = useState(null);
   const [approvalDialog, setApprovalDialog] = useState(false);
@@ -68,7 +68,7 @@ const HotfixManagement = () => {
   const [missingDependencies, setMissingDependencies] = useState([]);
 
   const environments = ['Development', 'Test', 'PreProduction', 'Production'];
-  const versions = ['v6.2.1', 'v6.2.0', 'v6.1.5', 'v6.1.0'];
+  const versions = ['v1.25.0', 'v1.24.0', 'v1.23.0', 'v1.22.0'];
 
   // Mock hotfix data
   const hotfixes = [
@@ -77,12 +77,12 @@ const HotfixManagement = () => {
       date: '2024-01-12',
       service: 'payment-service',
       description: 'Kredi kartı ödeme işleminde timeout hatası düzeltildi',
-      version: 'v2.5.3',
-      tag: 'hotfix-payment-2.5.3',
+      version: 'v1.24.0',
+      tag: 'hotfix-payment-1.24.0',
       release: 'Release-16',
       type: 'bug',
       breakingChange: false,
-      dependencies: [3], // auth-service 4.1.2'ye bağımlı
+      dependencies: [3], // auth-service'e bağımlı
       dbChanges: [
         { type: 'ALTER', table: 'payments', description: 'timeout_duration kolonuna index eklendi', breaking: false },
         { type: 'UPDATE', table: 'payment_config', description: 'Default timeout değeri 30sn -> 60sn olarak güncellendi', breaking: false }
@@ -93,8 +93,8 @@ const HotfixManagement = () => {
       date: '2024-01-13',
       service: 'reporting-service',
       description: 'Müşteri raporlarında tarih formatı düzeltildi',
-      version: 'v3.2.1',
-      tag: 'hotfix-reporting-3.2.1',
+      version: 'v1.23.0',
+      tag: 'hotfix-reporting-1.23.0',
       release: 'Release-16',
       type: 'bug',
       breakingChange: true,
@@ -110,8 +110,8 @@ const HotfixManagement = () => {
       date: '2024-01-14',
       service: 'auth-service',
       description: 'Token yenileme mekanizması iyileştirildi',
-      version: 'v4.1.2',
-      tag: 'hotfix-auth-4.1.2',
+      version: 'v1.24.0',
+      tag: 'hotfix-auth-1.24.0',
       release: 'Release-15',
       type: 'feature',
       breakingChange: false,
@@ -126,12 +126,12 @@ const HotfixManagement = () => {
       date: '2024-01-15',
       service: 'loan-service',
       description: 'Kredi hesaplama algoritması optimize edildi',
-      version: 'v5.3.1',
-      tag: 'hotfix-loan-5.3.1',
+      version: 'v1.25.0',
+      tag: 'hotfix-loan-1.25.0',
       release: 'Release-16',
       type: 'feature',
       breakingChange: false,
-      dependencies: [1, 3], // payment-service 2.5.3 ve auth-service 4.1.2'ye bağımlı
+      dependencies: [1, 3], // payment-service ve auth-service'e bağımlı
       dbChanges: []
     },
     {
@@ -139,8 +139,8 @@ const HotfixManagement = () => {
       date: '2024-01-16',
       service: 'notification-service',
       description: 'Email gönderim hatası düzeltildi',
-      version: 'v2.8.4',
-      tag: 'hotfix-notification-2.8.4',
+      version: 'v1.23.0',
+      tag: 'hotfix-notification-1.23.0',
       release: 'Release-14',
       type: 'bug',
       breakingChange: false,
@@ -470,7 +470,6 @@ const HotfixManagement = () => {
                       label={hotfix.release} 
                       size="small" 
                       icon={<ReleaseIcon />}
-                      color="secondary"
                     />
                   </TableCell>
                   <TableCell>
@@ -478,7 +477,6 @@ const HotfixManagement = () => {
                       icon={typeInfo.icon}
                       label={typeInfo.label}
                       size="small"
-                      color={typeInfo.color}
                     />
                   </TableCell>
                   <TableCell>

@@ -64,10 +64,10 @@ const HotfixRequest = () => {
 
   // Mock versions (bazıları yayınlanmış, bazıları freeze aşamasında)
   const versions = [
-    { id: 1, version: 'v6.3.0', isReleased: false, releaseDate: null, status: 'freeze' },
-    { id: 2, version: 'v6.2.0', isReleased: true, releaseDate: '2025-10-01', status: 'released' },
-    { id: 3, version: 'v6.1.0', isReleased: true, releaseDate: '2025-09-15', status: 'released' },
-    { id: 4, version: 'v6.0.0', isReleased: true, releaseDate: '2025-09-01', status: 'released' },
+    { id: 1, version: 'v1.25.0', isReleased: false, releaseDate: null, status: 'freeze' },
+    { id: 2, version: 'v1.24.0', isReleased: true, releaseDate: '2025-10-01', status: 'released' },
+    { id: 3, version: 'v1.23.0', isReleased: true, releaseDate: '2025-09-15', status: 'released' },
+    { id: 4, version: 'v1.22.0', isReleased: true, releaseDate: '2025-09-01', status: 'released' },
   ];
 
   // Mock Azure Work Items (sadece yayınlanmış versiyonlar için)
@@ -84,7 +84,7 @@ const HotfixRequest = () => {
     {
       id: 1,
       service: 'Core API',
-      version: 'v6.2.0',
+      version: 'v1.24.0',
       isReleased: true,
       requestedBy: 'Ahmet Yılmaz',
       requestedByEmail: 'ahmet.yilmaz@company.com',
@@ -97,7 +97,7 @@ const HotfixRequest = () => {
     {
       id: 2,
       service: 'Payment Service',
-      version: 'v6.3.0',
+      version: 'v1.25.0',
       isReleased: false,
       requestedBy: 'Ayşe Demir',
       requestedByEmail: 'ayse.demir@company.com',
@@ -110,20 +110,20 @@ const HotfixRequest = () => {
     {
       id: 3,
       service: 'Auth Service',
-      version: 'v6.2.0',
+      version: 'v1.24.0',
       isReleased: true,
       requestedBy: 'Can Öztürk',
       requestedByEmail: 'can.ozturk@company.com',
       requestDate: '2025-10-19 10:00',
       workItems: [{ id: 123458, title: 'Auth token expiration problem' }],
-      dependentHotfixes: [{ id: 1, service: 'Core API', version: 'v6.2.0' }],
+      dependentHotfixes: [{ id: 1, service: 'Core API', version: 'v1.24.0' }],
       reason: 'Token expiration hatası kullanıcı deneyimini olumsuz etkiliyor. Günlük 1000+ kullanıcı etkileniyor.',
       status: 'ready_for_pr',
     },
     {
       id: 4,
       service: 'Customer Service',
-      version: 'v6.1.0',
+      version: 'v1.23.0',
       isReleased: true,
       requestedBy: 'Mehmet Kaya',
       requestedByEmail: 'mehmet.kaya@company.com',

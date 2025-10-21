@@ -58,18 +58,18 @@ const PipelineStatus = () => {
           ]
         },
         {
-          name: 'release/v1.0.0-prod-1',
+          name: 'release/v1.0.0-rc-1',
           stages: [
-            { id: 8, name: 'release/v1.0.0-prod-1', status: 'success', type: 'tag' },
+            { id: 8, name: 'release/v1.0.0-rc-1', status: 'success', type: 'tag' },
             { id: 9, name: 'Azure Pipeline', status: 'success', type: 'deploy' },
             { id: 10, name: 'Docker Image', status: 'success', type: 'build' },
             { id: 11, name: 'K8s PreProd', status: 'success', type: 'deploy' },
           ]
         },
         {
-          name: 'release/v1.0.0-prod-2',
+          name: 'release/v1.0.0-rc-2',
           stages: [
-            { id: 13, name: 'release/v1.0.0-prod-2', status: 'success', type: 'tag' },
+            { id: 13, name: 'release/v1.0.0-rc-2', status: 'success', type: 'tag' },
             { id: 14, name: 'Azure Pipeline', status: 'success', type: 'deploy' },
           ]
         },
@@ -83,7 +83,7 @@ const PipelineStatus = () => {
       hotfix: {
         branch: 'release/v1.0.1',
         stages: [
-          { id: 13, name: 'release/v1.0.1-prod-1', status: 'success', type: 'tag' },
+          { id: 13, name: 'release/v1.0.1-rc-1', status: 'success', type: 'tag' },
           { id: 14, name: 'Azure Pipeline', status: 'success', type: 'deploy' },
           { id: 15, name: 'Docker Image', status: 'success', type: 'build' },
           { id: 16, name: 'K8s PreProd', status: 'success', type: 'deploy' },

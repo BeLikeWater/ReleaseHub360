@@ -41,8 +41,10 @@ import {
 const customerVersion = 4;
 const currentRelease = 6;
 const pendingReleases = currentRelease - customerVersion;
-const pendingHotfixes = 3;
-const pendingUrgents = 2;
+const pendingHotfixes = 5;
+const criticalHotfixes = 2;
+const pendingUrgents = 7;
+const expiredUrgents = 3;
 
 const CustomerDashboard = () => {
   const navigate = useNavigate();
@@ -58,62 +60,62 @@ const CustomerDashboard = () => {
   const versions = [
     {
       id: 1,
-      version: 'v6.2.1',
-      state: 'Published',
-      testStartDate: '2025-10-10',
-      publishDate: '2025-10-15',
-      environments: {
-        dev: { planned: '2025-10-16', actual: '2025-10-16' },
-        test: { planned: '2025-10-18', actual: '2025-10-17' },
-        prod: { planned: '2025-10-20', actual: '2025-10-19' }
-      }
-    },
-    {
-      id: 2,
-      version: 'v6.1.0',
-      state: 'Published',
-      testStartDate: '2025-09-15',
-      publishDate: '2025-09-25',
-      environments: {
-        dev: { planned: '2025-09-26', actual: '2025-09-26' },
-        test: { planned: '2025-09-28', actual: '2025-09-27' },
-        prod: { planned: '2025-10-01', actual: '2025-09-30' }
-      }
-    },
-    {
-      id: 3,
-      version: 'v6.0.3',
-      state: 'Test',
-      testStartDate: '2025-10-12',
-      publishDate: '',
-      environments: {
-        dev: { planned: '2025-10-20', actual: '' },
-        test: { planned: '2025-10-22', actual: '' },
-        prod: { planned: '2025-10-25', actual: '' }
-      }
-    },
-    {
-      id: 4,
-      version: 'v6.0.2',
+      version: 'v1.25.0',
       state: 'InProgress',
       testStartDate: '',
       publishDate: '',
       environments: {
-        dev: { planned: '2025-10-28', actual: '' },
-        test: { planned: '2025-10-30', actual: '' },
-        prod: { planned: '2025-11-01', actual: '' }
+        dev: { planned: '2025-11-01', actual: '' },
+        test: { planned: '2025-11-05', actual: '' },
+        prod: { planned: '2025-11-10', actual: '' }
       }
     },
     {
-      id: 5,
-      version: 'v5.9.1',
+      id: 2,
+      version: 'v1.24.0',
+      state: 'Test',
+      testStartDate: '2025-10-18',
+      publishDate: '',
+      environments: {
+        dev: { planned: '2025-10-22', actual: '2025-10-22' },
+        test: { planned: '2025-10-25', actual: '' },
+        prod: { planned: '2025-10-28', actual: '' }
+      }
+    },
+    {
+      id: 3,
+      version: 'v1.23.0',
       state: 'Published',
-      testStartDate: '2025-08-20',
+      testStartDate: '2025-09-20',
+      publishDate: '2025-10-05',
+      environments: {
+        dev: { planned: '2025-10-06', actual: '2025-10-06' },
+        test: { planned: '2025-10-08', actual: '2025-10-07' },
+        prod: { planned: '2025-10-10', actual: '2025-10-09' }
+      }
+    },
+    {
+      id: 4,
+      version: 'v1.22.0',
+      state: 'Published',
+      testStartDate: '2025-08-15',
       publishDate: '2025-09-01',
       environments: {
         dev: { planned: '2025-09-02', actual: '2025-09-02' },
         test: { planned: '2025-09-05', actual: '2025-09-04' },
-        prod: { planned: '2025-09-10', actual: '2025-09-08' }
+        prod: { planned: '2025-09-08', actual: '2025-09-07' }
+      }
+    },
+    {
+      id: 5,
+      version: 'v1.21.0',
+      state: 'Published',
+      testStartDate: '2025-07-10',
+      publishDate: '2025-08-01',
+      environments: {
+        dev: { planned: '2025-08-02', actual: '2025-08-02' },
+        test: { planned: '2025-08-05', actual: '2025-08-04' },
+        prod: { planned: '2025-08-10', actual: '2025-08-08' }
       }
     }
   ];
@@ -201,7 +203,7 @@ const CustomerDashboard = () => {
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Box>
             <Typography variant="h4" sx={{ fontWeight: 'bold', color: 'primary.main', mb: 1 }}>
-              Müşteri Portal Dashboard
+              Müşteri Portal
             </Typography>
             <Typography variant="subtitle1" color="text.secondary">
               Güncel Durum ve Bekleyen İşlemler
@@ -227,7 +229,7 @@ const CustomerDashboard = () => {
 
       <Grid container spacing={4}>
         {/* Bekleyen Release Kartı */}
-        <Grid item xs={12} md={4}>
+        <Grid item >
           <Card 
             elevation={12}
             sx={{ 
@@ -258,7 +260,7 @@ const CustomerDashboard = () => {
                   </Avatar>
                   <Box>
                     <Typography variant="h6" fontWeight="bold">
-                      Bekleyen Release
+                      Bekleyen Güncellemeler
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
                       Yeni sürüm güncellemeleri
@@ -273,53 +275,89 @@ const CustomerDashboard = () => {
                 />
               </Box>
               
+              {/* Mevcut Versiyon */}
               <Box sx={{ mb: 2 }}>
-                <Grid container spacing={1}>
+                <Paper 
+                  elevation={3}
+                  sx={{ 
+                    p: 2, 
+                    bgcolor: 'primary.main', 
+                    color: 'white', 
+                    borderRadius: 2,
+                    textAlign: 'center',
+                    background: 'linear-gradient(135deg, #1976d2 0%, #1565c0 100%)',
+                    boxShadow: '0 4px 12px rgba(25, 118, 210, 0.3)'
+                  }}
+                >
+                  <Typography variant="caption" sx={{ opacity: 0.9, display: 'block', mb: 0.5 }}>
+                    📌 Mevcut Versiyon
+                  </Typography>
+                  <Typography variant="h5" fontWeight="bold">
+                    v1.23.0
+                  </Typography>
+                </Paper>
+              </Box>
+
+              {/* Bekleyen Versiyonlar */}
+              <Box>
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block', fontWeight: 600 }}>
+                  🔔 Bekleyen Güncellemeler
+                </Typography>
+                <Grid container spacing={1.5}>
                   <Grid item xs={6}>
-                    <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'primary.main', color: 'white', borderRadius: 1 }}>
-                      <Typography variant="h6" fontWeight="bold">
-                        v{customerVersion}
+                    <Paper 
+                      elevation={2}
+                      sx={{ 
+                        p: 1.5, 
+                        bgcolor: '#fff3e0', 
+                        borderRadius: 2,
+                        textAlign: 'center',
+                        border: '2px solid #ff9800',
+                        transition: 'transform 0.2s',
+                        '&:hover': {
+                          transform: 'scale(1.05)'
+                        }
+                      }}
+                    >
+                      <Typography variant="body2" fontWeight="bold" color="warning.dark">
+                        v1.24.0
                       </Typography>
-                      <Typography variant="caption">
-                        Müşteri
+                      <Typography variant="caption" color="text.secondary">
+                        Sonraki
                       </Typography>
-                    </Box>
+                    </Paper>
                   </Grid>
                   <Grid item xs={6}>
-                    <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'success.main', color: 'white', borderRadius: 1 }}>
-                      <Typography variant="h6" fontWeight="bold">
-                        v{currentRelease}
+                    <Paper 
+                      elevation={2}
+                      sx={{ 
+                        p: 1.5, 
+                        bgcolor: '#e8f5e9', 
+                        borderRadius: 2,
+                        textAlign: 'center',
+                        border: '2px solid #4caf50',
+                        transition: 'transform 0.2s',
+                        '&:hover': {
+                          transform: 'scale(1.05)'
+                        }
+                      }}
+                    >
+                      <Typography variant="body2" fontWeight="bold" color="success.dark">
+                        v1.25.0
                       </Typography>
-                      <Typography variant="caption">
-                        Son Release
+                      <Typography variant="caption" color="text.secondary">
+                        Planlanan
                       </Typography>
-                    </Box>
+                    </Paper>
                   </Grid>
                 </Grid>
-                <Box sx={{ mt: 1.5 }}>
-                  <LinearProgress 
-                    variant="determinate" 
-                    value={getProgressValue(customerVersion, currentRelease)} 
-                    sx={{ 
-                      height: 8, 
-                      borderRadius: 4,
-                      backgroundColor: 'rgba(25, 118, 210, 0.1)',
-                      '& .MuiLinearProgress-bar': {
-                        backgroundColor: 'primary.main'
-                      }
-                    }}
-                  />
-                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block', textAlign: 'center' }}>
-                    %{Math.round(getProgressValue(customerVersion, currentRelease))} Güncel
-                  </Typography>
-                </Box>
               </Box>
             </CardContent>
           </Card>
         </Grid>
 
         {/* Bekleyen Hotfix Kartı */}
-        <Grid item xs={12} md={4}>
+        <Grid item xs={12} md={6}>
           <Card 
             elevation={12}
             onClick={() => navigate('/hotfix-management')}
@@ -365,56 +403,82 @@ const CustomerDashboard = () => {
                 />
               </Box>
               
+              {/* Toplam Hotfix Sayısı */}
               <Box sx={{ mb: 2 }}>
-                <Grid container spacing={1}>
-                  <Grid item xs={4}>
-                    <Box sx={{ textAlign: 'center', p: 1, bgcolor: 'error.main', color: 'white', borderRadius: 1 }}>
-                      <Typography variant="body1" fontWeight="bold">
-                        {pendingHotfixes}
+                <Paper 
+                  elevation={3}
+                  sx={{ 
+                    p: 2, 
+                    bgcolor: 'error.main', 
+                    color: 'white', 
+                    borderRadius: 2,
+                    textAlign: 'center',
+                    background: 'linear-gradient(135deg, #d32f2f 0%, #c62828 100%)',
+                    boxShadow: '0 4px 12px rgba(211, 47, 47, 0.3)'
+                  }}
+                >
+                  <Typography variant="caption" sx={{ opacity: 0.9, display: 'block', mb: 0.5 }}>
+                    � Toplam Hotfix
+                  </Typography>
+                  <Typography variant="h5" fontWeight="bold">
+                    {pendingHotfixes} Adet
+                  </Typography>
+                </Paper>
+              </Box>
+
+              {/* Hotfix Detayı */}
+              <Box>
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block', fontWeight: 600 }}>
+                  📊 Hotfix Detayı
+                </Typography>
+                <Grid container spacing={1.5}>
+                  <Grid item xs={6}>
+                    <Paper 
+                      elevation={2}
+                      sx={{ 
+                        p: 1.5, 
+                        bgcolor: '#ffebee', 
+                        borderRadius: 2,
+                        textAlign: 'center',
+                        border: '2px solid #f44336',
+                        transition: 'transform 0.2s',
+                        '&:hover': {
+                          transform: 'scale(1.05)'
+                        }
+                      }}
+                    >
+                      <Typography variant="h6" fontWeight="bold" color="error.dark">
+                        {criticalHotfixes}
                       </Typography>
-                      <Typography variant="caption">
+                      <Typography variant="caption" color="text.secondary">
                         Kritik
                       </Typography>
-                    </Box>
+                    </Paper>
                   </Grid>
-                  <Grid item xs={4}>
-                    <Box sx={{ textAlign: 'center', p: 1, bgcolor: 'warning.main', color: 'white', borderRadius: 1 }}>
-                      <Typography variant="body1" fontWeight="bold">
-                        2
+                  <Grid item xs={6}>
+                    <Paper 
+                      elevation={2}
+                      sx={{ 
+                        p: 1.5, 
+                        bgcolor: '#fff3e0', 
+                        borderRadius: 2,
+                        textAlign: 'center',
+                        border: '2px solid #ff9800',
+                        transition: 'transform 0.2s',
+                        '&:hover': {
+                          transform: 'scale(1.05)'
+                        }
+                      }}
+                    >
+                      <Typography variant="h6" fontWeight="bold" color="warning.dark">
+                        {pendingHotfixes - criticalHotfixes}
                       </Typography>
-                      <Typography variant="caption">
-                        Test
+                      <Typography variant="caption" color="text.secondary">
+                        Normal
                       </Typography>
-                    </Box>
-                  </Grid>
-                  <Grid item xs={4}>
-                    <Box sx={{ textAlign: 'center', p: 1, bgcolor: 'success.main', color: 'white', borderRadius: 1 }}>
-                      <Typography variant="body1" fontWeight="bold">
-                        1
-                      </Typography>
-                      <Typography variant="caption">
-                        Hazır
-                      </Typography>
-                    </Box>
+                    </Paper>
                   </Grid>
                 </Grid>
-                <Box sx={{ mt: 1.5 }}>
-                  <LinearProgress 
-                    variant="determinate" 
-                    value={75} 
-                    sx={{ 
-                      height: 8, 
-                      borderRadius: 4,
-                      backgroundColor: 'rgba(211, 47, 47, 0.1)',
-                      '& .MuiLinearProgress-bar': {
-                        backgroundColor: 'error.main'
-                      }
-                    }}
-                  />
-                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block', textAlign: 'center' }}>
-                    %75 Tamamlandı
-                  </Typography>
-                </Box>
               </Box>
             </CardContent>
           </Card>
@@ -467,56 +531,82 @@ const CustomerDashboard = () => {
                 />
               </Box>
               
+              {/* Toplam Acil Değişiklik Sayısı */}
               <Box sx={{ mb: 2 }}>
-                <Grid container spacing={1}>
-                  <Grid item xs={4}>
-                    <Box sx={{ textAlign: 'center', p: 1, bgcolor: 'warning.main', color: 'white', borderRadius: 1 }}>
-                      <Typography variant="body1" fontWeight="bold">
-                        {pendingUrgents}
+                <Paper 
+                  elevation={3}
+                  sx={{ 
+                    p: 2, 
+                    bgcolor: 'warning.main', 
+                    color: 'white', 
+                    borderRadius: 2,
+                    textAlign: 'center',
+                    background: 'linear-gradient(135deg, #f57c00 0%, #ef6c00 100%)',
+                    boxShadow: '0 4px 12px rgba(255, 152, 0, 0.3)'
+                  }}
+                >
+                  <Typography variant="caption" sx={{ opacity: 0.9, display: 'block', mb: 0.5 }}>
+                    ⚡ Toplam Acil Değişiklik
+                  </Typography>
+                  <Typography variant="h5" fontWeight="bold">
+                    {pendingUrgents} Adet
+                  </Typography>
+                </Paper>
+              </Box>
+
+              {/* Acil Değişiklik Detayı */}
+              <Box>
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block', fontWeight: 600 }}>
+                  📊 Değişiklik Detayı
+                </Typography>
+                <Grid container spacing={1.5}>
+                  <Grid item xs={6}>
+                    <Paper 
+                      elevation={2}
+                      sx={{ 
+                        p: 1.5, 
+                        bgcolor: '#ffebee', 
+                        borderRadius: 2,
+                        textAlign: 'center',
+                        border: '2px solid #f44336',
+                        transition: 'transform 0.2s',
+                        '&:hover': {
+                          transform: 'scale(1.05)'
+                        }
+                      }}
+                    >
+                      <Typography variant="h6" fontWeight="bold" color="error.dark">
+                        {expiredUrgents}
                       </Typography>
-                      <Typography variant="caption">
-                        Aktif
+                      <Typography variant="caption" color="text.secondary">
+                        Zamanı Geçmiş
                       </Typography>
-                    </Box>
+                    </Paper>
                   </Grid>
-                  <Grid item xs={4}>
-                    <Box sx={{ textAlign: 'center', p: 1, bgcolor: 'info.main', color: 'white', borderRadius: 1 }}>
-                      <Typography variant="body1" fontWeight="bold">
-                        1
+                  <Grid item xs={6}>
+                    <Paper 
+                      elevation={2}
+                      sx={{ 
+                        p: 1.5, 
+                        bgcolor: '#e8f5e9', 
+                        borderRadius: 2,
+                        textAlign: 'center',
+                        border: '2px solid #4caf50',
+                        transition: 'transform 0.2s',
+                        '&:hover': {
+                          transform: 'scale(1.05)'
+                        }
+                      }}
+                    >
+                      <Typography variant="h6" fontWeight="bold" color="success.dark">
+                        {pendingUrgents - expiredUrgents}
                       </Typography>
-                      <Typography variant="caption">
-                        Analiz
+                      <Typography variant="caption" color="text.secondary">
+                        Normal
                       </Typography>
-                    </Box>
-                  </Grid>
-                  <Grid item xs={4}>
-                    <Box sx={{ textAlign: 'center', p: 1, bgcolor: 'success.main', color: 'white', borderRadius: 1 }}>
-                      <Typography variant="body1" fontWeight="bold">
-                        3
-                      </Typography>
-                      <Typography variant="caption">
-                        Tamam
-                      </Typography>
-                    </Box>
+                    </Paper>
                   </Grid>
                 </Grid>
-                <Box sx={{ mt: 1.5 }}>
-                  <LinearProgress 
-                    variant="determinate" 
-                    value={40} 
-                    sx={{ 
-                      height: 8, 
-                      borderRadius: 4,
-                      backgroundColor: 'rgba(255, 152, 0, 0.1)',
-                      '& .MuiLinearProgress-bar': {
-                        backgroundColor: 'warning.main'
-                      }
-                    }}
-                  />
-                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block', textAlign: 'center' }}>
-                    %40 İlerleme
-                  </Typography>
-                </Box>
               </Box>
             </CardContent>
           </Card>
@@ -647,76 +737,6 @@ const CustomerDashboard = () => {
                 </TableBody>
               </Table>
             </TableContainer>
-          </Paper>
-        </Grid>
-
-        {/* Özet Bilgi Kartı */}
-        <Grid item xs={12}>
-          <Paper 
-            elevation={8}
-            sx={{ 
-              p: 4, 
-              borderRadius: 3,
-              background: 'rgba(255, 255, 255, 0.95)',
-              backdropFilter: 'blur(10px)'
-            }}
-          >
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-              <Typography variant="h5" fontWeight="bold">
-                Genel Durum Özeti
-              </Typography>
-              <Box sx={{ display: 'flex', gap: 2 }}>
-                <IconButton color="primary">
-                  <TrendIcon />
-                </IconButton>
-                <IconButton color="primary">
-                  <ReportIcon />
-                </IconButton>
-              </Box>
-            </Box>
-            
-            <Grid container spacing={3}>
-              <Grid item xs={12} sm={6} md={3}>
-                <Box sx={{ textAlign: 'center', p: 2 }}>
-                  <Typography variant="h3" color="primary.main" fontWeight="bold">
-                    {pendingReleases + pendingHotfixes + pendingUrgents}
-                  </Typography>
-                  <Typography variant="body1" color="text.secondary">
-                    Toplam Bekleyen İş
-                  </Typography>
-                </Box>
-              </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <Box sx={{ textAlign: 'center', p: 2 }}>
-                  <Typography variant="h3" color="success.main" fontWeight="bold">
-                    85%
-                  </Typography>
-                  <Typography variant="body1" color="text.secondary">
-                    Genel Tamamlanma
-                  </Typography>
-                </Box>
-              </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <Box sx={{ textAlign: 'center', p: 2 }}>
-                  <Typography variant="h3" color="warning.main" fontWeight="bold">
-                    3
-                  </Typography>
-                  <Typography variant="body1" color="text.secondary">
-                    Gün Ortalama Süre
-                  </Typography>
-                </Box>
-              </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <Box sx={{ textAlign: 'center', p: 2 }}>
-                  <Typography variant="h3" color="error.main" fontWeight="bold">
-                    1
-                  </Typography>
-                  <Typography variant="body1" color="text.secondary">
-                    Kritik Öncelik
-                  </Typography>
-                </Box>
-              </Grid>
-            </Grid>
           </Paper>
         </Grid>
       </Grid>

@@ -304,7 +304,7 @@ const CustomerManagement = () => {
               {/* Azure Release Template */}
               <TextField
                 fullWidth
-                label="Azure Release Template (Opsiyonel)"
+                label="Azure Release Template"
                 value={formData.azureReleaseTemplate}
                 onChange={(e) => handleInputChange('azureReleaseTemplate', e.target.value)}
                 helperText="Her müşteri için ayrı release tanımı varsa template adını giriniz"
