@@ -14,6 +14,8 @@ import HotfixManagement from './components/HotfixManagement';
 import UrgentChanges from './components/UrgentChanges';
 import ReleaseCalendar from './components/ReleaseCalendar';
 import ReleaseHealthCheck from './components/ReleaseHealthCheck';
+import ReleaseHealthCheckSimplified from './components/ReleaseHealthCheckSimplified';
+import ReleaseHealthCheckV2 from './components/releaseHealthCheckParts/ReleaseHealthCheckV2';
 import PipelineStatus from './components/PipelineStatus';
 import BetaTagRequest from './components/BetaTagRequest';
 import HotfixRequest from './components/HotfixRequest';
@@ -23,9 +25,15 @@ import ServiceVersionMatrix from './components/ServiceVersionMatrix';
 import CustomerReleaseTrack from './components/CustomerReleaseTrack';
 import CustomerServiceMapping from './components/CustomerServiceMapping';
 import CustomerManagement from './components/CustomerManagement';
+import CustomerManagementV2 from './components/CustomerManagementV2';
+import CustomerProductMappingV2 from './components/CustomerProductMappingV2';
 import ProductManagement from './components/ProductManagement';
 import ReleaseTodoManagement from './components/ReleaseTodoManagement';
 import UrgentChangesManagement from './components/UrgentChangesManagement';
+import ProductCatalog from './components/ProductCatalog';
+import ModuleGroupManagement from './components/ModuleGroupManagement';
+import ModuleManagement from './components/ModuleManagement';
+import ApiManagement from './components/ApiManagement';
 
 const theme = createTheme({
   palette: {
@@ -80,6 +88,8 @@ function App() {
             <Route path="/urgent-changes" element={<UrgentChanges />} />
             <Route path="/release-calendar" element={<ReleaseCalendar />} />
             <Route path="/release-health-check" element={<ReleaseHealthCheck />} />
+            <Route path="/release-health-check-simplified" element={<ReleaseHealthCheckSimplified />} />
+            <Route path="/release-health-check-v2" element={<ReleaseHealthCheckV2 />} />
             <Route path="/pipeline-status" element={<PipelineStatus />} />
             <Route path="/beta-tag-request" element={<BetaTagRequest />} />
             <Route path="/hotfix-request" element={<HotfixRequest />} />
@@ -92,6 +102,12 @@ function App() {
         <Route path="/product-management" element={<ProductManagement />} />
         <Route path="/release-todo-management" element={<ReleaseTodoManagement />} />
         <Route path="/urgent-changes-management" element={<UrgentChangesManagement />} />
+        <Route path="/customer-management-v2" element={<CustomerManagementV2 />} />
+        <Route path="/customer-product-mapping-v2" element={<CustomerProductMappingV2 />} />
+        <Route path="/product-catalog" element={<ProductCatalog />} />
+        <Route path="/module-group-management" element={<ModuleGroupManagement />} />
+        <Route path="/module-management" element={<ModuleManagement />} />
+        <Route path="/api-management" element={<ApiManagement />} />
           </Routes>
         </Layout>
       </Router>

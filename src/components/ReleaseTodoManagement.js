@@ -36,31 +36,28 @@ import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import GroupIcon from '@mui/icons-material/Group';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 
-// Mock Data - Versiyonlar (Release Takviminden gelecek)
-const mockVersions = [
-  { id: 1, version: 'v1.24.0', releaseDate: '2025-10-25' },
-  { id: 2, version: 'v1.23.5', releaseDate: '2025-10-18' },
-  { id: 3, version: 'v1.23.0', releaseDate: '2025-10-11' },
-  { id: 4, version: 'v1.22.8', releaseDate: '2025-10-04' },
+// Mock Data - Ürün Grupları
+const mockProductGroups = [
+  { id: 1, name: 'OBA Suite', currentVersion: '', versions: [] },
+  { id: 2, name: 'AppWys', currentVersion: '1.1.0', versions: ['1.1.0', '1.0.5', '1.0.0'] },
 ];
 
 // Mock Data - Müşteriler
 const mockCustomers = [
-  { id: 1, name: 'Türkiye Finans Katılım Bankası', shortName: 'TFKB' },
-  { id: 2, name: 'Kuveyt Türk Katılım Bankası', shortName: 'KTKB' },
-  { id: 3, name: 'Albaraka Türk Katılım Bankası', shortName: 'ATKB' },
-  { id: 4, name: 'Vakıf Katılım Bankası', shortName: 'VKB' },
+  { id: 1, name: 'KT Bank AG', shortName: 'KTAG' },
 ];
 
 // Mock Data - Başlangıç ToDo'ları
 const initialTodos = [
   {
     id: 1,
-    version: 'v1.24.0',
-    description: 'Veritabanı migration scriptleri çalıştırılacak',
+    productId: 2,
+    productName: 'AppWys',
+    version: 'Yeni Versiyon',
+    description: `TOGG konusu için yapılması gereken güncellemeler\n\nProcess:\n- b875d13d-dbec-4bac-9175-956c247654b2 - ConsFin_edit_loan_drawer formunda güncelleme yapıldı\n- 751ede26-f7b0-4cc9-9def-8d8aa10bf2dd - loan\n\nForms:\n- d8994a65-7f8f-4142-b118-8717271db6cb - ConsFin_start\n- ffdc6fe1-e80b-4098-a31b-ea40fafb2ea2 - ConsFin_loanAmountInfo\n- f3998991-81d3-4abc-90be-79579ae81912 - ConsFin_start_carAge\n\nHttpConnector:\n- cb5170bb-3537-4398-9a7f-1f312afd8909\n\nProcessColumnSettings:\n- 46dde57d-9da8-4d73-b614-766d34282210\n\nUpdateStatus apisi için apisix'de public tanımlamalar yapılacak`,
     timing: 'Geçiş Öncesi',
-    responsibleTeam: 'Database',
-    customers: [1, 2], // TFKB, KTKB
+    responsibleTeam: 'Delivery',
+    customers: [1],
     requiresOnsite: true,
     priority: 'Yüksek',
     order: 1,
@@ -68,11 +65,13 @@ const initialTodos = [
   },
   {
     id: 2,
-    version: 'v1.24.0',
+    productId: 2,
+    productName: 'AppWys',
+    version: '1.1.0',
     description: 'Kubernetes pod restart',
     timing: 'Geçiş Anında',
     responsibleTeam: 'DevOps',
-    customers: [], // Tüm müşteriler
+    customers: [],
     requiresOnsite: false,
     priority: 'Kritik',
     order: 2,
@@ -80,7 +79,9 @@ const initialTodos = [
   },
   {
     id: 3,
-    version: 'v1.24.0',
+    productId: 2,
+    productName: 'AppWys',
+    version: '1.1.0',
     description: 'Smoke test kontrolü',
     timing: 'Geçiş Sonrası',
     responsibleTeam: 'Delivery',
@@ -90,18 +91,6 @@ const initialTodos = [
     order: 3,
     attachments: [],
   },
-  {
-    id: 4,
-    version: 'v1.23.5',
-    description: 'Cache temizleme işlemi',
-    timing: 'Geçiş Öncesi',
-    responsibleTeam: 'DevOps',
-    customers: [3], // ATKB
-    requiresOnsite: false,
-    priority: 'Düşük',
-    order: 1,
-    attachments: [],
-  },
 ];
 
 const ReleaseTodoManagement = () => {
@@ -109,8 +98,11 @@ const ReleaseTodoManagement = () => {
   const [openDialog, setOpenDialog] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [currentTodo, setCurrentTodo] = useState(null);
+  const [selectedProduct, setSelectedProduct] = useState(''); // Ürün filtresi
   const [selectedVersion, setSelectedVersion] = useState(''); // Versiyon filtresi
   const [formData, setFormData] = useState({
+    productId: '',
+    productName: '',
     version: '',
     description: '',
     timing: 'Geçiş Öncesi',
@@ -131,6 +123,8 @@ const ReleaseTodoManagement = () => {
       setEditMode(true);
       setCurrentTodo(todo);
       setFormData({
+        productId: todo.productId,
+        productName: todo.productName,
         version: todo.version,
         description: todo.description,
         timing: todo.timing,
@@ -145,6 +139,8 @@ const ReleaseTodoManagement = () => {
       setEditMode(false);
       setCurrentTodo(null);
       setFormData({
+        productId: '',
+        productName: '',
         version: '',
         description: '',
         timing: 'Geçiş Öncesi',
@@ -247,9 +243,21 @@ const ReleaseTodoManagement = () => {
   };
 
   // Filtrelenmiş todos
-  const filteredTodos = selectedVersion 
-    ? todos.filter(todo => todo.version === selectedVersion)
-    : todos;
+  const filteredTodos = todos.filter(todo => {
+    const productMatch = selectedProduct ? todo.productId === selectedProduct : true;
+    const versionMatch = selectedVersion ? todo.version === selectedVersion : true;
+    return productMatch && versionMatch;
+  });
+
+  // Seçilen ürüne göre versiyonları getir
+  const getVersionsForProduct = (productId) => {
+    const product = mockProductGroups.find(p => p.id === productId);
+    if (!product) return [];
+    
+    const versions = product.versions.map(v => ({ label: v, value: v }));
+    versions.push({ label: '📌 Yeni Versiyon (Hazırlanmakta)', value: 'Yeni Versiyon' });
+    return versions;
+  };
 
   return (
     <Box sx={{ p: 3 }}>
@@ -259,16 +267,35 @@ const ReleaseTodoManagement = () => {
         </Typography>
         <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
           <FormControl sx={{ minWidth: 200 }}>
+            <InputLabel>Ürün Filtresi</InputLabel>
+            <Select
+              value={selectedProduct}
+              label="Ürün Filtresi"
+              onChange={(e) => {
+                setSelectedProduct(e.target.value);
+                setSelectedVersion(''); // Ürün değişince versiyon filtresini sıfırla
+              }}
+            >
+              <MenuItem value="">Tüm Ürünler</MenuItem>
+              {mockProductGroups.map((p) => (
+                <MenuItem key={p.id} value={p.id}>
+                  {p.name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <FormControl sx={{ minWidth: 200 }}>
             <InputLabel>Versiyon Filtresi</InputLabel>
             <Select
               value={selectedVersion}
               label="Versiyon Filtresi"
               onChange={(e) => setSelectedVersion(e.target.value)}
+              disabled={!selectedProduct}
             >
               <MenuItem value="">Tüm Versiyonlar</MenuItem>
-              {mockVersions.map((v) => (
-                <MenuItem key={v.id} value={v.version}>
-                  {v.version} ({v.releaseDate})
+              {selectedProduct && getVersionsForProduct(selectedProduct).map((v, idx) => (
+                <MenuItem key={idx} value={v.value}>
+                  {v.label}
                 </MenuItem>
               ))}
             </Select>
@@ -292,6 +319,7 @@ const ReleaseTodoManagement = () => {
           <TableHead>
             <TableRow sx={{ bgcolor: '#1976d2' }}>
               <TableCell sx={{ color: 'white', fontWeight: 'bold', width: 50 }}>Sıra</TableCell>
+              <TableCell sx={{ color: 'white', fontWeight: 'bold', width: 120 }}>Ürün</TableCell>
               <TableCell sx={{ color: 'white', fontWeight: 'bold', width: 100 }}>Versiyon</TableCell>
               <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Açıklama</TableCell>
               <TableCell sx={{ color: 'white', fontWeight: 'bold', width: 130 }}>Zaman</TableCell>
@@ -337,9 +365,17 @@ const ReleaseTodoManagement = () => {
                   </Box>
                 </TableCell>
                 <TableCell>
-                  <Chip label={todo.version} size="small" color="primary" variant="outlined" />
+                  <Chip label={todo.productName} size="small" color="secondary" />
                 </TableCell>
                 <TableCell>
+                  <Chip 
+                    label={todo.version} 
+                    size="small" 
+                    color={todo.version === 'Yeni Versiyon' ? 'success' : 'primary'} 
+                    variant="outlined" 
+                  />
+                </TableCell>
+                <TableCell sx={{ whiteSpace: 'pre-wrap' }}>
                   {todo.description}
                 </TableCell>
                 <TableCell>
@@ -415,15 +451,38 @@ const ReleaseTodoManagement = () => {
         <DialogContent>
           <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2.5 }}>
             <FormControl fullWidth required>
+              <InputLabel>Ürün</InputLabel>
+              <Select
+                value={formData.productId}
+                onChange={(e) => {
+                  const product = mockProductGroups.find(p => p.id === e.target.value);
+                  setFormData({ 
+                    ...formData, 
+                    productId: e.target.value,
+                    productName: product?.name || '',
+                    version: '' // Ürün değişince versiyonu sıfırla
+                  });
+                }}
+                label="Ürün"
+              >
+                {mockProductGroups.map(p => (
+                  <MenuItem key={p.id} value={p.id}>
+                    {p.name} {p.currentVersion && `(Mevcut: ${p.currentVersion})`}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <FormControl fullWidth required disabled={!formData.productId}>
               <InputLabel>Versiyon</InputLabel>
               <Select
                 value={formData.version}
                 onChange={(e) => setFormData({ ...formData, version: e.target.value })}
                 label="Versiyon"
               >
-                {mockVersions.map(v => (
-                  <MenuItem key={v.id} value={v.version}>
-                    {v.version} - {v.releaseDate}
+                {formData.productId && getVersionsForProduct(formData.productId).map((v, idx) => (
+                  <MenuItem key={idx} value={v.value}>
+                    {v.label}
                   </MenuItem>
                 ))}
               </Select>

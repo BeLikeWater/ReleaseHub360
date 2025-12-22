@@ -39,47 +39,36 @@ import LinkIcon from '@mui/icons-material/Link';
 
 // Mock Data - Servisler
 const initialServices = [
-  { id: 1, name: 'auth-service', description: 'Kimlik doğrulama ve yetkilendirme servisi', version: 'v1.24.0' },
-  { id: 2, name: 'notification-service', description: 'Bildirim yönetimi servisi', version: 'v1.22.0' },
-  { id: 3, name: 'logging-service', description: 'Merkezi loglama servisi', version: 'v1.20.0' },
-  { id: 4, name: 'limit-service', description: 'Kredi limit hesaplama servisi', version: 'v2.1.0' },
-  { id: 5, name: 'tahsis-service', description: 'Kredi tahsis servisi', version: 'v2.0.5' },
-  { id: 6, name: 'risk-service', description: 'Risk değerlendirme servisi', version: 'v1.15.0' },
-  { id: 7, name: 'payment-service', description: 'Ödeme işlemleri servisi', version: 'v3.2.0' },
-  { id: 8, name: 'account-service', description: 'Hesap yönetimi servisi', version: 'v2.5.0' },
+  { id: 1, name: 'cofins-backofficeportal', description: 'Backoffice portal servisi', version: '1.0.20251113.3' },
+  { id: 2, name: 'cofins-bff-api', description: 'Backend for Frontend API servisi', version: '1.0.20251202.2' },
+  { id: 3, name: 'cofins-content-service', description: 'İçerik yönetimi servisi', version: '1.0.20251125.2' },
+  { id: 4, name: 'cofins-customerportal', description: 'Müşteri portal servisi', version: '1.0.20251126.2' },
+  { id: 5, name: 'cofins-file-service', description: 'Dosya yönetimi servisi', version: '1.0.20250721.2' },
+  { id: 6, name: 'cofins-service-api', description: 'Servis API', version: '1.0.20251202.2' },
+  { id: 7, name: 'cofins-worker-service-api', description: 'Worker servis API', version: '1.0.20251202.2' },
 ];
 
 // Mock Data - Ürün Grupları
 const initialProductGroups = [
   {
     id: 1,
-    name: 'Altyapı Grubu',
-    description: 'Temel altyapı servisleri',
-    serviceIds: [1, 2, 3], // auth, notification, logging
+    name: 'OBA Suite',
+    description: 'OBA Suite ürün grubu',
+    serviceIds: [],
     color: '#2196F3',
   },
   {
     id: 2,
-    name: 'Kredi Grubu',
-    description: 'Kredi işlemleri servisleri',
-    serviceIds: [4, 5, 6], // limit, tahsis, risk
+    name: 'AppWys',
+    description: 'AppWys ürün grubu',
+    version: '1.1.0',
+    serviceIds: [1, 2, 3, 4, 5, 6, 7], // Tüm servisler
     color: '#4CAF50',
-  },
-  {
-    id: 3,
-    name: 'Ödeme Grubu',
-    description: 'Ödeme ve hesap servisleri',
-    serviceIds: [7, 8], // payment, account
-    color: '#FF9800',
   },
 ];
 
 // Mock Data - Grup Bağımlılıkları
-const initialGroupDependencies = [
-  { id: 1, groupId: 2, dependsOnGroupId: 1, mandatory: true }, // Kredi -> Altyapı (zorunlu)
-  { id: 2, groupId: 3, dependsOnGroupId: 1, mandatory: true }, // Ödeme -> Altyapı (zorunlu)
-  { id: 3, groupId: 2, dependsOnGroupId: 3, mandatory: false }, // Kredi -> Ödeme (opsiyonel)
-];
+const initialGroupDependencies = [];
 
 const ProductManagement = () => {
   const [activeTab, setActiveTab] = useState(0);
@@ -328,6 +317,14 @@ const ProductManagement = () => {
                       <Typography variant="body2" color="text.secondary">
                         {group.description}
                       </Typography>
+                      {group.version && (
+                        <Chip 
+                          label={`v${group.version}`} 
+                          size="small" 
+                          color="success" 
+                          sx={{ mt: 1 }}
+                        />
+                      )}
                     </Box>
                     <Box>
                       <IconButton size="small" color="primary" onClick={() => handleOpenGroupDialog(group)}>

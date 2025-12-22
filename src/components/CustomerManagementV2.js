@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Paper,
@@ -22,24 +22,12 @@ import {
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
+import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { db } from '../firebase';
 
-// Mock Data - Başlangıç müşterileri (Katılım Bankaları)
-const initialCustomers = [
-  {
-    id: 5,
-    name: 'KT Bank AG',
-    tenantName: 'ktbank-prod',
-    supportSuffix: 'KTAG',
-    emailDomain: 'kt-bank.de',
-    devOpsEmails: ['devops@kt-bank.de'],
-    approverEmails: ['release-approvers@kt-bank.de'],
-    environments: ['Test', 'Prep', 'Prod'],
-    azureReleaseTemplate: 'ktbank-release-template-v1',
-  },
-];
-
-const CustomerManagement = () => {
-  const [customers, setCustomers] = useState(initialCustomers);
+const CustomerManagementV2 = () => {
+  const [customers, setCustomers] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [openDialog, setOpenDialog] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [currentCustomer, setCurrentCustomer] = useState(null);
@@ -53,6 +41,28 @@ const CustomerManagement = () => {
     environments: '',
     azureReleaseTemplate: '',
   });
+
+  // Firestore'dan müşterileri getir
+  const fetchCustomers = async () => {
+    try {
+      setLoading(true);
+      const querySnapshot = await getDocs(collection(db, 'customers'));
+      const customersData = [];
+      querySnapshot.forEach((doc) => {
+        customersData.push({ id: doc.id, ...doc.data() });
+      });
+      setCustomers(customersData);
+    } catch (error) {
+      console.error('Müşteriler yüklenirken hata:', error);
+      alert('Müşteriler yüklenirken hata oluştu: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCustomers();
+  }, []);
 
   const handleOpenDialog = (customer = null) => {
     if (customer) {
@@ -95,40 +105,74 @@ const CustomerManagement = () => {
     setFormData({ ...formData, [field]: value });
   };
 
-  const handleSave = () => {
-    const newCustomer = {
-      id: editMode ? currentCustomer.id : Date.now(),
-      name: formData.name,
-      tenantName: formData.tenantName,
-      supportSuffix: formData.supportSuffix,
-      emailDomain: formData.emailDomain,
-      devOpsEmails: formData.devOpsEmails.split(',').map(e => e.trim()).filter(e => e),
-      approverEmails: formData.approverEmails.split(',').map(e => e.trim()).filter(e => e),
-      environments: formData.environments.split(',').map(e => e.trim()).filter(e => e),
-      azureReleaseTemplate: formData.azureReleaseTemplate,
-    };
+  const handleSave = async () => {
+    try {
+      const customerData = {
+        name: formData.name,
+        tenantName: formData.tenantName,
+        supportSuffix: formData.supportSuffix,
+        emailDomain: formData.emailDomain,
+        devOpsEmails: formData.devOpsEmails.split(',').map(e => e.trim()).filter(e => e),
+        approverEmails: formData.approverEmails.split(',').map(e => e.trim()).filter(e => e),
+        environments: formData.environments.split(',').map(e => e.trim()).filter(e => e),
+        azureReleaseTemplate: formData.azureReleaseTemplate,
+      };
 
-    if (editMode) {
-      setCustomers(customers.map(c => c.id === currentCustomer.id ? newCustomer : c));
-    } else {
-      setCustomers([...customers, newCustomer]);
+      if (editMode) {
+        // Güncelleme
+        const customerRef = doc(db, 'customers', currentCustomer.id);
+        await updateDoc(customerRef, customerData);
+        
+        // Local state'i güncelle
+        setCustomers(prevCustomers => 
+          prevCustomers.map(c => 
+            c.id === currentCustomer.id 
+              ? { ...c, ...customerData }
+              : c
+          )
+        );
+      } else {
+        // Yeni ekleme
+        const docRef = await addDoc(collection(db, 'customers'), customerData);
+        
+        // Local state'i güncelle
+        setCustomers(prevCustomers => [
+          ...prevCustomers,
+          { id: docRef.id, ...customerData }
+        ]);
+      }
+      
+      handleCloseDialog();
+    } catch (error) {
+      console.error('Kaydetme hatası:', error);
+      alert('Kaydetme hatası: ' + error.message);
     }
-
-    handleCloseDialog();
   };
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     if (window.confirm('Bu müşteriyi silmek istediğinizden emin misiniz?')) {
-      setCustomers(customers.filter(c => c.id !== id));
+      try {
+        await deleteDoc(doc(db, 'customers', id));
+        
+        // Local state'i güncelle
+        setCustomers(prevCustomers => 
+          prevCustomers.filter(c => c.id !== id)
+        );
+      } catch (error) {
+        console.error('Silme hatası:', error);
+        alert('Silme hatası: ' + error.message);
+      }
     }
   };
 
   return (
     <Box sx={{ p: 3 }}>
+      <Typography variant="h4" fontWeight="bold" sx={{ mb: 3 }}>
+        Müşteri Yönetimi V2
+      </Typography>
+
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" fontWeight="bold">
-          Müşteri Yönetimi
-        </Typography>
+        <Typography variant="h6">Müşteriler</Typography>
         <Button
           variant="contained"
           startIcon={<AddIcon />}
@@ -138,49 +182,64 @@ const CustomerManagement = () => {
         </Button>
       </Box>
 
-      <TableContainer component={Paper}>
-        <Table>
-          <TableHead>
-            <TableRow sx={{ bgcolor: '#1976d2' }}>
-              <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Müşteri Adı</TableCell>
-              <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Tenant Adı</TableCell>
-              <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Destek Suffix</TableCell>
-              <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Email Domain</TableCell>
-              <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Ortamlar</TableCell>
-              <TableCell sx={{ color: 'white', fontWeight: 'bold', textAlign: 'center' }}>İşlemler</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {customers.map((customer) => (
-              <TableRow key={customer.id} hover>
-                <TableCell sx={{ fontWeight: 'bold' }}>{customer.name}</TableCell>
-                <TableCell>
-                  <Chip label={customer.tenantName} size="small" color="primary" variant="outlined" />
-                </TableCell>
-                <TableCell>
-                  <Chip label={customer.supportSuffix} size="small" color="secondary" />
-                </TableCell>
-                <TableCell>{customer.emailDomain}</TableCell>
-                <TableCell>
-                  <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-                    {customer.environments.map((env, idx) => (
-                      <Chip key={idx} label={env} size="small" />
-                    ))}
-                  </Box>
-                </TableCell>
-                <TableCell sx={{ textAlign: 'center' }}>
-                  <IconButton size="small" color="primary" onClick={() => handleOpenDialog(customer)}>
-                    <EditIcon />
-                  </IconButton>
-                  <IconButton size="small" color="error" onClick={() => handleDelete(customer.id)}>
-                    <DeleteIcon />
-                  </IconButton>
-                </TableCell>
+      {loading ? (
+        <Paper sx={{ p: 3, textAlign: 'center' }}>
+          <Typography>Yükleniyor...</Typography>
+        </Paper>
+      ) : customers.length === 0 ? (
+        <Paper sx={{ p: 3, textAlign: 'center' }}>
+          <Typography variant="h6" color="text.secondary" sx={{ mb: 2 }}>
+            Henüz müşteri kaydı bulunmuyor
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            İlk müşteriyi eklemek için yukarıdaki "Yeni Müşteri Ekle" butonuna tıklayın
+          </Typography>
+        </Paper>
+      ) : (
+        <TableContainer component={Paper}>
+          <Table>
+            <TableHead>
+              <TableRow sx={{ bgcolor: '#1976d2' }}>
+                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Müşteri Adı</TableCell>
+                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Tenant Adı</TableCell>
+                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Destek Suffix</TableCell>
+                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Email Domain</TableCell>
+                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Ortamlar</TableCell>
+                <TableCell sx={{ color: 'white', fontWeight: 'bold', textAlign: 'center' }}>İşlemler</TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
+            </TableHead>
+            <TableBody>
+              {customers.map((customer) => (
+                <TableRow key={customer.id} hover>
+                  <TableCell sx={{ fontWeight: 'bold' }}>{customer.name}</TableCell>
+                  <TableCell>
+                    <Chip label={customer.tenantName} size="small" color="primary" variant="outlined" />
+                  </TableCell>
+                  <TableCell>
+                    <Chip label={customer.supportSuffix} size="small" color="secondary" />
+                  </TableCell>
+                  <TableCell>{customer.emailDomain}</TableCell>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                      {customer.environments.map((env, idx) => (
+                        <Chip key={idx} label={env} size="small" />
+                      ))}
+                    </Box>
+                  </TableCell>
+                  <TableCell sx={{ textAlign: 'center' }}>
+                    <IconButton size="small" color="primary" onClick={() => handleOpenDialog(customer)}>
+                      <EditIcon />
+                    </IconButton>
+                    <IconButton size="small" color="error" onClick={() => handleDelete(customer.id)}>
+                      <DeleteIcon />
+                    </IconButton>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
 
       {/* Müşteri Ekleme/Düzenleme Dialog */}
       <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="md" fullWidth>
@@ -194,6 +253,7 @@ const CustomerManagement = () => {
             </Alert>
 
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+              {/* Müşteri Adı */}
               <TextField
                 fullWidth
                 label="Müşteri Adı"
@@ -203,6 +263,7 @@ const CustomerManagement = () => {
                 helperText="Örn: Türkiye Finans Katılım Bankası, Kuveyt Türk"
               />
 
+              {/* Tenant Adı */}
               <TextField
                 fullWidth
                 label="Tenant Adı"
@@ -212,6 +273,7 @@ const CustomerManagement = () => {
                 helperText="Örn: turkiyefinans-prod, kuveytturk-prod"
               />
 
+              {/* Destek Suffix */}
               <TextField
                 fullWidth
                 label="Destek Uygulaması Suffix"
@@ -221,6 +283,7 @@ const CustomerManagement = () => {
                 helperText="Jira/Destek sistemindeki kayıt prefix'i. Örn: TFKB, KTKB, ATKB"
               />
 
+              {/* Email Domain */}
               <TextField
                 fullWidth
                 label="Email Domain"
@@ -230,6 +293,7 @@ const CustomerManagement = () => {
                 helperText="Örn: turkiyefinans.com.tr, kuveytturk.com.tr"
               />
 
+              {/* DevOps Email Adresleri */}
               <TextField
                 fullWidth
                 label="DevOps Ekip Email Adresleri"
@@ -241,6 +305,7 @@ const CustomerManagement = () => {
                 helperText="Virgülle ayırarak birden fazla email girebilirsiniz"
               />
 
+              {/* Onaylayıcı Email Adresleri */}
               <TextField
                 fullWidth
                 label="Onaylayıcı Ekip Email Adresleri"
@@ -252,6 +317,7 @@ const CustomerManagement = () => {
                 helperText="Virgülle ayırarak birden fazla email girebilirsiniz"
               />
 
+              {/* Ortamlar */}
               <TextField
                 fullWidth
                 label="Ortamlar (Environments)"
@@ -261,6 +327,7 @@ const CustomerManagement = () => {
                 helperText="Virgülle ayırarak giriniz. Örn: Dev, Test, Preprod, Prod"
               />
 
+              {/* Azure Release Template */}
               <TextField
                 fullWidth
                 label="Azure Release Template"
@@ -294,4 +361,4 @@ const CustomerManagement = () => {
   );
 };
 
-export default CustomerManagement;
+export default CustomerManagementV2;
