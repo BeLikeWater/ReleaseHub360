@@ -18,6 +18,11 @@ import {
   IconButton,
   Chip,
   Alert,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  OutlinedInput,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
@@ -27,6 +32,7 @@ import { db } from '../firebase';
 
 const CustomerManagementV2 = () => {
   const [customers, setCustomers] = useState([]);
+  const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [openDialog, setOpenDialog] = useState(false);
   const [editMode, setEditMode] = useState(false);
@@ -40,6 +46,7 @@ const CustomerManagementV2 = () => {
     approverEmails: '',
     environments: '',
     azureReleaseTemplate: '',
+    selectedProduct: '',
   });
 
   // Firestore'dan müşterileri getir
@@ -60,8 +67,23 @@ const CustomerManagementV2 = () => {
     }
   };
 
+  // Firestore'dan ürünleri getir
+  const fetchProducts = async () => {
+    try {
+      const querySnapshot = await getDocs(collection(db, 'products'));
+      const productsData = [];
+      querySnapshot.forEach((doc) => {
+        productsData.push({ id: doc.id, ...doc.data() });
+      });
+      setProducts(productsData);
+    } catch (error) {
+      console.error('Ürünler yüklenirken hata:', error);
+    }
+  };
+
   useEffect(() => {
     fetchCustomers();
+    fetchProducts();
   }, []);
 
   const handleOpenDialog = (customer = null) => {
@@ -77,6 +99,7 @@ const CustomerManagementV2 = () => {
         approverEmails: customer.approverEmails.join(', '),
         environments: customer.environments.join(', '),
         azureReleaseTemplate: customer.azureReleaseTemplate || '',
+        selectedProduct: customer.selectedProduct || '',
       });
     } else {
       setEditMode(false);
@@ -90,6 +113,7 @@ const CustomerManagementV2 = () => {
         approverEmails: '',
         environments: '',
         azureReleaseTemplate: '',
+        selectedProduct: '',
       });
     }
     setOpenDialog(true);
@@ -116,6 +140,7 @@ const CustomerManagementV2 = () => {
         approverEmails: formData.approverEmails.split(',').map(e => e.trim()).filter(e => e),
         environments: formData.environments.split(',').map(e => e.trim()).filter(e => e),
         azureReleaseTemplate: formData.azureReleaseTemplate,
+        selectedProduct: formData.selectedProduct,
       };
 
       if (editMode) {
@@ -204,6 +229,7 @@ const CustomerManagementV2 = () => {
                 <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Tenant Adı</TableCell>
                 <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Destek Suffix</TableCell>
                 <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Email Domain</TableCell>
+                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Ürünler</TableCell>
                 <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Ortamlar</TableCell>
                 <TableCell sx={{ color: 'white', fontWeight: 'bold', textAlign: 'center' }}>İşlemler</TableCell>
               </TableRow>
@@ -219,6 +245,17 @@ const CustomerManagementV2 = () => {
                     <Chip label={customer.supportSuffix} size="small" color="secondary" />
                   </TableCell>
                   <TableCell>{customer.emailDomain}</TableCell>
+                  <TableCell>
+                    {customer.selectedProduct ? (
+                      <Chip 
+                        label={products.find(p => p.id === customer.selectedProduct)?.name || 'Bilinmeyen'} 
+                        size="small" 
+                        color="success"
+                      />
+                    ) : (
+                      <Typography variant="body2" color="text.secondary">-</Typography>
+                    )}
+                  </TableCell>
                   <TableCell>
                     <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
                       {customer.environments.map((env, idx) => (
@@ -326,6 +363,25 @@ const CustomerManagementV2 = () => {
                 required
                 helperText="Virgülle ayırarak giriniz. Örn: Dev, Test, Preprod, Prod"
               />
+
+              {/* Ürün Seçimi */}
+              <FormControl fullWidth>
+                <InputLabel>Ürün</InputLabel>
+                <Select
+                  value={formData.selectedProduct}
+                  onChange={(e) => handleInputChange('selectedProduct', e.target.value)}
+                  label="Ürün"
+                >
+                  <MenuItem value="">
+                    <em>Ürün Seçiniz</em>
+                  </MenuItem>
+                  {products.map((product) => (
+                    <MenuItem key={product.id} value={product.id}>
+                      {product.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
 
               {/* Azure Release Template */}
               <TextField

@@ -5,6 +5,7 @@ import CssBaseline from '@mui/material/CssBaseline';
 import Layout from './components/Layout';
 import ProcessFlow from './components/ProcessFlow';
 import CustomerDashboard from './components/CustomerDashboard';
+import CustomerDashboardV2 from './components/CustomerDashboardV2';
 import Releases from './components/Releases';
 import TodoList from './components/TodoList';
 import ChangeTracking from './components/ChangeTracking';
@@ -13,6 +14,7 @@ import ReleaseNotes from './components/ReleaseNotes';
 import HotfixManagement from './components/HotfixManagement';
 import UrgentChanges from './components/UrgentChanges';
 import ReleaseCalendar from './components/ReleaseCalendar';
+import ReleaseCalendarV3 from './components/ReleaseCalendarV3';
 import ReleaseHealthCheck from './components/ReleaseHealthCheck';
 import ReleaseHealthCheckSimplified from './components/ReleaseHealthCheckSimplified';
 import ReleaseHealthCheckV2 from './components/releaseHealthCheckParts/ReleaseHealthCheckV2';
@@ -79,6 +81,7 @@ function App() {
           <Routes>
             <Route path="/" element={<ProcessFlow />} />
             <Route path="/customer-dashboard" element={<CustomerDashboard />} />
+            <Route path="/customer-dashboard-v2" element={<CustomerDashboardV2 />} />
             <Route path="/releases" element={<Releases />} />
             <Route path="/todo-list" element={<TodoList />} />
             <Route path="/change-tracking" element={<ChangeTracking />} />
@@ -87,6 +90,7 @@ function App() {
             <Route path="/hotfix-management" element={<HotfixManagement />} />
             <Route path="/urgent-changes" element={<UrgentChanges />} />
             <Route path="/release-calendar" element={<ReleaseCalendar />} />
+            <Route path="/release-calendar-v3" element={<ReleaseCalendarV3 />} />
             <Route path="/release-health-check" element={<ReleaseHealthCheck />} />
             <Route path="/release-health-check-simplified" element={<ReleaseHealthCheckSimplified />} />
             <Route path="/release-health-check-v2" element={<ReleaseHealthCheckV2 />} />

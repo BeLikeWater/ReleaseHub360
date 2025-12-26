@@ -47,6 +47,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 const Layout = ({ children }) => {
   const [drawerOpen, setDrawerOpen] = useState(true);
   const [customerDashboardOpen, setCustomerDashboardOpen] = useState(false);
+  const [customerDashboardV2Open, setCustomerDashboardV2Open] = useState(false);
   const [releaseManagementOpen, setReleaseManagementOpen] = useState(false);
   const [releaseManagementV2Open, setReleaseManagementV2Open] = useState(false);
   const [definitionsOpen, setDefinitionsOpen] = useState(false);
@@ -68,6 +69,11 @@ const Layout = ({ children }) => {
     { text: 'Release Notları', icon: <ReleaseNotesIcon />, path: '/release-notes' },
     { text: 'Hotfix Yönetimi', icon: <BugReportIcon />, path: '/hotfix-management' },
     { text: 'Urgent Changes', icon: <UrgentIcon />, path: '/urgent-changes' },
+  ];
+
+  const customerDashboardV2Items = [
+    { text: 'Müşteri Yönetimi V2', icon: <BusinessIcon />, path: '/customer-management-v2' },
+    { text: 'Dashboard Özet V2', icon: <DashboardIcon />, path: '/customer-dashboard-v2' },
   ];
 
   const definitionsItems = [
@@ -109,6 +115,10 @@ const Layout = ({ children }) => {
 
   const handleCustomerDashboardClick = () => {
     setCustomerDashboardOpen(!customerDashboardOpen);
+  };
+
+  const handleCustomerDashboardV2Click = () => {
+    setCustomerDashboardV2Open(!customerDashboardV2Open);
   };
 
   const handleReleaseManagementClick = () => {
@@ -349,6 +359,23 @@ const Layout = ({ children }) => {
               {/* Tanımlar İçeriği */}
               <Collapse in={definitionsV2Open} timeout="auto" unmountOnExit>
                 <List component="div" disablePadding>
+                  {/* Release Calendar V3 */}
+                  <ListItem disablePadding>
+                    <ListItemButton
+                      sx={{ pl: 6, py: 0.5 }}
+                      selected={location.pathname === '/release-calendar-v3'}
+                      onClick={() => handleMenuClick('/release-calendar-v3')}
+                    >
+                      <ListItemIcon sx={{ minWidth: 32 }}>
+                        <CalendarIcon fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText 
+                        primary="Release Calendar V3"
+                        primaryTypographyProps={{ fontSize: '0.8125rem' }}
+                      />
+                    </ListItemButton>
+                  </ListItem>
+                  
                   {definitionsV2Items.map((item) => (
                     <ListItem key={item.text} disablePadding>
                       <ListItemButton
@@ -366,6 +393,43 @@ const Layout = ({ children }) => {
                   ))}
                 </List>
               </Collapse>
+            </List>
+          </Collapse>
+
+          <Divider sx={{ my: 1 }} />
+
+          {/* Müşteri Dashboard V2 Ana Menü */}
+          <ListItem disablePadding>
+            <ListItemButton onClick={handleCustomerDashboardV2Click} sx={{ py: 1 }}>
+              <ListItemIcon sx={{ minWidth: 40 }}>
+                <V2Icon />
+              </ListItemIcon>
+              <ListItemText 
+                primary="Müşteri Dashboard V2" 
+                primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: 600 }}
+              />
+              {customerDashboardV2Open ? <ExpandLess /> : <ExpandMore />}
+            </ListItemButton>
+          </ListItem>
+
+          {/* Müşteri Dashboard V2 Alt Menü */}
+          <Collapse in={customerDashboardV2Open} timeout="auto" unmountOnExit>
+            <List component="div" disablePadding>
+              {customerDashboardV2Items.map((item) => (
+                <ListItem key={item.text} disablePadding>
+                  <ListItemButton
+                    sx={{ pl: 3, py: 0.75 }}
+                    selected={location.pathname === item.path}
+                    onClick={() => handleMenuClick(item.path)}
+                  >
+                    <ListItemIcon sx={{ minWidth: 36 }}>{item.icon}</ListItemIcon>
+                    <ListItemText 
+                      primary={item.text}
+                      primaryTypographyProps={{ fontSize: '0.8125rem' }}
+                    />
+                  </ListItemButton>
+                </ListItem>
+              ))}
             </List>
           </Collapse>
 

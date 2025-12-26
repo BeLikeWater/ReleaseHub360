@@ -43,7 +43,7 @@ import NewReleasesIcon from '@mui/icons-material/NewReleases';
 import InfoIcon from '@mui/icons-material/Info';
 import CloseIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, addDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import PullRequestsList from './PullRequestsList';
 import PipelineStatusSection from './PipelineStatusSection';
@@ -369,14 +369,46 @@ const ReleaseHealthCheckV2 = () => {
     }));
   };
 
-  const handlePublish = () => {
+  const handlePublish = async () => {
     if (!newVersion) {
       alert('Lütfen yeni versiyon numarası girin!');
       return;
     }
-    // Burada yeni versiyon yayınlama işlemi yapılacak
-    alert(`Yeni versiyon ${newVersion} yayınlanacak. Mevcut versiyon: ${selectedProductData?.version}`);
-    // TODO: API call to update product version
+    
+    if (!selectedProduct || !selectedProductData) {
+      alert('Lütfen bir ürün seçin!');
+      return;
+    }
+    
+    try {
+      console.log('🚀 Yeni versiyon yayınlanıyor...');
+      console.log('Product ID:', selectedProduct);
+      console.log('Product Name:', selectedProductData.name);
+      console.log('New Version:', newVersion);
+      console.log('Previous Version:', selectedProductData.currentVersion);
+      
+      // Firestore'a productVersions collection'ına kaydet
+      const productVersionsRef = collection(db, 'productVersions');
+      await addDoc(productVersionsRef, {
+        productId: selectedProduct,
+        productName: selectedProductData.name,
+        version: newVersion,
+        previousVersion: selectedProductData.currentVersion || '',
+        createdAt: new Date().toISOString(),
+        createdBy: 'System', // Buraya kullanıcı bilgisi eklenebilir
+        status: 'published'
+      });
+      
+      console.log('✅ Versiyon başarıyla kaydedildi');
+      alert(`✅ Başarılı!\n\nYeni versiyon ${newVersion} yayınlandı.\nÖnceki versiyon: ${selectedProductData.currentVersion || 'Yok'}`);
+      
+      // Input'ı temizle
+      setNewVersion('');
+      
+    } catch (error) {
+      console.error('❌ Versiyon yayınlama hatası:', error);
+      alert('❌ Hata: ' + error.message);
+    }
   };
 
   const getStatusColor = (status) => {
