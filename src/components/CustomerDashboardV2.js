@@ -30,7 +30,7 @@ import {
 } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../firebase';
-import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, doc, getDoc } from 'firebase/firestore';
 import {
   RocketLaunch as ReleaseIcon,
   BugReport as HotfixIcon,
@@ -80,6 +80,15 @@ const pendingUrgents = 7;
 const expiredUrgents = 3;
 
 const CustomerDashboardV2 = () => {
+  // Versiyon numarasını numeric değere çevir (v1.2.1 -> 121)
+  const versionToNumber = (version) => {
+    if (!version) return 0;
+    const clean = version.replace(/^v/, ''); // v önekini kaldır
+    const parts = clean.split('.').map(p => parseInt(p) || 0);
+    // Major * 100 + Minor * 10 + Patch
+    return parts[0] * 100 + (parts[1] || 0) * 10 + (parts[2] || 0);
+  };
+
   const navigate = useNavigate();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loginData, setLoginData] = useState({ email: '', password: '' });
@@ -93,7 +102,142 @@ const CustomerDashboardV2 = () => {
     prod: { planned: '', actual: '' }
   });
   const [versions, setVersions] = useState([]);
+  const [customerProducts, setCustomerProducts] = useState([]);
   const [loading, setLoading] = useState(false);
+
+  // Firebase'den müşterinin ürün ve versiyon bilgilerini çekme
+  const fetchCustomerProducts = async (customerId) => {
+    if (!customerId) {
+      console.log('Customer ID bulunamadı');
+      return;
+    }
+
+    try {
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('🔍 MÜŞTERİ ÜRÜNLERİ ARAMA BAŞLADI');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('🆔 Aranan Customer ID:', customerId);
+      console.log('   Tip:', typeof customerId);
+      console.log('   Uzunluk:', customerId.length);
+      console.log('   Char kodları:', Array.from(customerId).map(c => c.charCodeAt(0)).join(', '));
+      console.log('');
+
+      // Önce tüm collection'ı oku
+      console.log('📚 TÜM customerProductMappings COLLECTION OKUNUYOR...');
+      const mappingsRef = collection(db, 'customerProductMappings');
+      const allSnapshot = await getDocs(mappingsRef);
+      
+      console.log('📊 Toplam döküman sayısı:', allSnapshot.size);
+      console.log('');
+
+      if (allSnapshot.size > 0) {
+        console.log('📑 TÜM DÖKÜMANLAR:');
+        allSnapshot.forEach((doc, index) => {
+          const data = doc.data();
+          console.log(`  📦 Döküman #${index + 1}:`);
+          console.log('     Doc ID:', doc.id);
+          console.log('     customerId:', data.customerId);
+          console.log('     customerId tip:', typeof data.customerId);
+          console.log('     productId:', data.productId);
+          console.log('     version:', data.version);
+          console.log('     Eşleşiyor mu?', data.customerId === customerId);
+          console.log('     ---');
+        });
+        console.log('');
+      }
+
+      // Şimdi filtreli sorgu yapalım
+      console.log('🔎 FİLTRELİ SORGU YAPILIYOR...');
+      console.log('Filtre: customerId ==', customerId);
+      console.log('');
+
+      const q = query(mappingsRef, where('customerId', '==', customerId));
+      const querySnapshot = await getDocs(q);
+
+      console.log('✅ Filtrelenmiş sonuç sayısı:', querySnapshot.size);
+      console.log('');
+
+      const products = [];
+      if (!querySnapshot.empty) {
+        console.log('🎉 EŞLEŞEN DÖKÜMANLAR:');
+        
+        // Her mapping için product bilgisini çek
+        for (const doc of querySnapshot.docs) {
+          const data = doc.data();
+          console.log(`  ✅ Eşleşme:`);
+          console.log('     Mapping Doc ID:', doc.id);
+          console.log('     customerId:', data.customerId);
+          console.log('     productId:', data.productId);
+          console.log('     version:', data.version);
+          
+          // Products collection'ından ürün adını çek
+          let productName = 'Ürün adı bulunamadı';
+          if (data.productId) {
+            try {
+              console.log('     🔍 Product adı aranıyor:', data.productId);
+              const productDoc = await getDocs(query(collection(db, 'products'), where('__name__', '==', data.productId)));
+              
+              if (!productDoc.empty) {
+                const productData = productDoc.docs[0].data();
+                productName = productData.name || 'İsimsiz ürün';
+                console.log('     ✅ Product adı bulundu:', productName);
+              } else {
+                // Döküman ID olarak direkt çekmeyi dene
+                console.log('     🔄 Direkt döküman ID ile deneniyor...');
+                const productDocRef = doc(db, 'products', data.productId);
+                const productSnapshot = await getDoc(productDocRef);
+                
+                if (productSnapshot.exists()) {
+                  const productData = productSnapshot.data();
+                  productName = productData.name || 'İsimsiz ürün';
+                  console.log('     ✅ Product adı bulundu (direkt):', productName);
+                } else {
+                  console.log('     ❌ Product bulunamadı');
+                }
+              }
+            } catch (productError) {
+              console.error('     ⚠️ Product adı alınamadı:', productError.message);
+            }
+          }
+          
+          console.log('');
+          
+          products.push({
+            id: doc.id,
+            productId: data.productId,
+            productName: productName,
+            version: data.version || 'Versiyon belirtilmemiş',
+            ...data
+          });
+        }
+      } else {
+        console.log('❌ HIÇ EŞLEŞME BULUNAMADI!');
+        console.log('');
+        console.log('🔧 KONTROL EDİLMESİ GEREKENLER:');
+        console.log('1. Yukarıdaki "TÜM DÖKÜMANLAR" listesinde "customerId" field\'i var mı?');
+        console.log('2. customerId değeri tam olarak "' + customerId + '" şeklinde mi?');
+        console.log('3. Tip uyuşmazlığı var mı? (string vs number)');
+        console.log('4. Büyük/küçük harf farkı var mı?');
+        console.log('');
+      }
+
+      console.log('📦 Kullanılacak final ürün listesi:', JSON.stringify(products, null, 2));
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('');
+
+      setCustomerProducts(products);
+
+      // İlk ürünün versiyonlarını yükle (eğer selectedProduct varsa)
+      if (products.length > 0 && products[0].productId) {
+        await fetchVersions(products[0].productId);
+      }
+    } catch (error) {
+      console.error('❌ Müşteri ürünleri yüklenirken hata:', error);
+      console.error('Hata detayı:', error.message);
+      console.error('Hata stack:', error.stack);
+      setCustomerProducts([]);
+    }
+  };
 
   // Firebase'den versiyonları çekme fonksiyonu
   const fetchVersions = async (productId) => {
@@ -194,6 +338,7 @@ const CustomerDashboardV2 = () => {
             status: data.status || 'Unknown',
             testDate: data.testDate || '',
             releaseDate: data.releaseDate || data.publishDate || '',
+            sira: data.sira || data.order || 0,
             environments: {
               dev: { 
                 planned: data.devPlannedDate || '', 
@@ -219,11 +364,9 @@ const CustomerDashboardV2 = () => {
         console.log('');
       }
       
-      // Release date'e göre sırala (client-side)
+      // Versiyon numarasına göre sırala (büyükten küçüğe)
       fetchedVersions.sort((a, b) => {
-        const dateA = new Date(a.publishDate || 0);
-        const dateB = new Date(b.publishDate || 0);
-        return dateB - dateA;
+        return versionToNumber(b.version) - versionToNumber(a.version);
       });
       
       console.log('📦 Yüklenen toplam versiyon sayısı:', fetchedVersions.length);
@@ -393,8 +536,12 @@ const CustomerDashboardV2 = () => {
         const firstDoc = querySnapshot.docs[0];
         customerFromDB = firstDoc.data();
         
+        // ÖNEMLI: Firebase döküman ID'sini ekle
+        customerFromDB.id = firstDoc.id;
+        
         console.log(`✅ Eşleşen Müşteri Bulundu`);
         console.log('   Doc ID:', firstDoc.id);
+        console.log('   ID Tipi:', typeof firstDoc.id);
         console.log('   Data:', JSON.stringify(customerFromDB, null, 2));
       } else {
         console.log('❌ FİLTREYE UYGUN MÜŞTERİ BULUNAMADI!');
@@ -441,6 +588,21 @@ const CustomerDashboardV2 = () => {
       
       setCustomerInfo(finalCustomerInfo);
       setIsLoggedIn(true);
+
+      // Müşterinin ürün ve versiyon bilgilerini çek
+      console.log('🔍 Müşteri ürünleri çekilecek...');
+      console.log('   customerFromDB var mı?', !!customerFromDB);
+      if (customerFromDB) {
+        console.log('   customerFromDB.id:', customerFromDB.id);
+        console.log('   customerFromDB.id tipi:', typeof customerFromDB.id);
+      }
+      
+      if (customerFromDB && customerFromDB.id) {
+        console.log('✅ fetchCustomerProducts çağrılıyor...');
+        await fetchCustomerProducts(customerFromDB.id);
+      } else {
+        console.log('❌ customerFromDB veya customerFromDB.id yok, ürünler çekilemiyor');
+      }
     } catch (error) {
       console.error('Login hatası:', error);
       setLoginError('Giriş sırasında bir hata oluştu: ' + error.message);
@@ -455,6 +617,8 @@ const CustomerDashboardV2 = () => {
     
     setIsLoggedIn(false);
     setCustomerInfo(null);
+    setCustomerProducts([]);
+    setVersions([]);
     setLoginData({ email: '', password: '' });
     setLoginError('');
   };
@@ -468,6 +632,11 @@ const CustomerDashboardV2 = () => {
         setCustomerInfo(loginInfo.customerInfo);
         setLoginData({ email: loginInfo.email, password: '' });
         setIsLoggedIn(true);
+
+        // Müşteri ID'si varsa ürünlerini çek
+        if (loginInfo.customerInfo && loginInfo.customerInfo.id) {
+          fetchCustomerProducts(loginInfo.customerInfo.id);
+        }
       } catch (error) {
         // Hatalı veri varsa temizle
         localStorage.removeItem('customerDashboardLogin');
@@ -664,16 +833,19 @@ const CustomerDashboardV2 = () => {
                 {customerInfo.name} - Müşteri Portal
               </Typography>
               <Typography variant="subtitle1" sx={{ opacity: 0.9 }}>
-                Mevcut Versiyon: {customerInfo.currentVersion} | Güncel Durum ve Bekleyen İşlemler
+                Güncel Durum ve Bekleyen İşlemler
               </Typography>
-              {customerInfo.selectedProduct && (
-                <Typography variant="body2" sx={{ opacity: 0.85, mt: 0.5 }}>
-                  📦 Seçili Ürün ID: {customerInfo.selectedProduct}
-                </Typography>
-              )}
-              {!customerInfo.selectedProduct && (
+              {customerProducts.length > 0 ? (
+                <Box sx={{ mt: 0.5 }}>
+                  {customerProducts.map((product, index) => (
+                    <Typography key={product.id} variant="body2" sx={{ opacity: 0.85, mt: 0.5 }}>
+                      📦 Ürün {index + 1}: <strong>{product.productName}</strong>
+                    </Typography>
+                  ))}
+                </Box>
+              ) : (
                 <Typography variant="body2" sx={{ opacity: 0.85, mt: 0.5, color: '#ffeb3b' }}>
-                  ⚠️ Ürün bilgisi Firebase'de tanımlı değil
+                  ⚠️ Müşteriye atanmış ürün bulunamadı
                 </Typography>
               )}
             </Box>
@@ -776,64 +948,111 @@ const CustomerDashboardV2 = () => {
                     📌 Mevcut Versiyon
                   </Typography>
                   <Typography variant="h5" fontWeight="bold">
-                    v1.23.0
+                    {customerProducts.length > 0 && customerProducts[0].version ? customerProducts[0].version : 'Bilinmiyor'}
                   </Typography>
                 </Paper>
               </Box>
 
-              {/* Bekleyen Versiyonlar */}
+              {/* Sonraki Versiyon veya Mesaj */}
               <Box>
-                <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block', fontWeight: 600 }}>
-                  🔔 Bekleyen Güncellemeler
-                </Typography>
-                <Grid container spacing={1.5}>
-                  <Grid item xs={6}>
-                    <Paper 
-                      elevation={2}
-                      sx={{ 
-                        p: 1.5, 
-                        bgcolor: '#fff3e0', 
-                        borderRadius: 2,
-                        textAlign: 'center',
-                        border: '2px solid #ff9800',
-                        transition: 'transform 0.2s',
-                        '&:hover': {
-                          transform: 'scale(1.05)'
-                        }
-                      }}
-                    >
-                      <Typography variant="body2" fontWeight="bold" color="warning.dark">
-                        v1.24.0
+                {(() => {
+                  // Mevcut versiyonu al (v harfini kaldır)
+                  const currentVersionRaw = customerProducts.length > 0 ? customerProducts[0].version : null;
+                  const currentVersion = currentVersionRaw ? currentVersionRaw.replace(/^v/, '') : null;
+                  
+                  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                  console.log('🔍 BEKLEYEN GÜNCELLEME KONTROLÜ');
+                  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                  console.log('📌 Müşterinin mevcut versiyonu:', currentVersion);
+                  console.log('📊 Toplam versiyon sayısı:', versions.length);
+                  console.log('');
+                  
+                  // Tüm versiyonları göster
+                  console.log('📋 TÜM VERSİYONLAR:');
+                  versions.forEach((v, index) => {
+                    console.log(`  ${index + 1}. Versiyon: ${v.version}, Status: "${v.status}", Sıra: ${v.sira || 'yok'}`);
+                  });
+                  console.log('');
+                  
+                  // Yayınlandı statusündeki versiyonları bul ve sıraya göre sırala
+                  const publishedVersions = versions
+                    .filter(v => {
+                      const isPublished = v.status === 'Published';
+                      console.log(`  Filtre: ${v.version} - Status: "${v.status}" - Eşleşiyor mu? ${isPublished}`);
+                      return isPublished;
+                    });
+                  
+                  console.log('');
+                  console.log('✅ FİLTRELENMİŞ (Published) VERSİYONLAR:', publishedVersions.length, 'adet');
+                  publishedVersions.forEach((v, index) => {
+                    console.log(`  ${index + 1}. ${v.version} - Sıra: ${v.sira || 'yok'}`);
+                  });
+                  console.log('');
+                  
+                  // Sırala (versiyon numarasına göre büyükten küçüğe)
+                  publishedVersions.sort((a, b) => versionToNumber(b.version) - versionToNumber(a.version));
+                  
+                  console.log('📊 SIRALANMIŞ (Büyükten küçüğe) VERSİYONLAR:');
+                  publishedVersions.forEach((v, index) => {
+                    console.log(`  ${index + 1}. ${v.version} - Sıra: ${v.sira || 0}`);
+                  });
+                  console.log('');
+                  
+                  // En yüksek sıralı yayınlanmış versiyonu bul
+                  const latestPublished = publishedVersions.length > 0 ? publishedVersions[0] : null;
+                  
+                  console.log('🎯 EN SON YAYINLANAN VERSİYON:', latestPublished ? latestPublished.version : 'YOK');
+                  console.log('');
+                  
+                  // Karşılaştırma (her iki versiyondan da v harfini kaldır)
+                  const latestVersion = latestPublished ? latestPublished.version.replace(/^v/, '') : null;
+                  const hasUpdate = latestVersion && latestVersion !== currentVersion;
+                  
+                  console.log('🔄 KARŞILAŞTIRMA:');
+                  console.log('   Mevcut versiyon:', currentVersion);
+                  console.log('   Son yayınlanan:', latestVersion);
+                  console.log('   Eşit mi?', latestVersion ? (latestVersion === currentVersion) : 'Karşılaştırılamıyor');
+                  console.log('   Güncelleme var mı?', hasUpdate);
+                  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+                  console.log('');
+                  
+                  if (!hasUpdate) {
+                    return (
+                      <Alert severity="success" sx={{ borderRadius: 2 }}>
+                        ✅ Bekleyen güncelleme bulunmamaktadır
+                      </Alert>
+                    );
+                  }
+                  
+                  return (
+                    <Box>
+                      <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block', fontWeight: 600 }}>
+                        🔔 Sonraki Güncelleme
                       </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        Sonraki
-                      </Typography>
-                    </Paper>
-                  </Grid>
-                  <Grid item xs={6}>
-                    <Paper 
-                      elevation={2}
-                      sx={{ 
-                        p: 1.5, 
-                        bgcolor: '#e8f5e9', 
-                        borderRadius: 2,
-                        textAlign: 'center',
-                        border: '2px solid #4caf50',
-                        transition: 'transform 0.2s',
-                        '&:hover': {
-                          transform: 'scale(1.05)'
-                        }
-                      }}
-                    >
-                      <Typography variant="body2" fontWeight="bold" color="success.dark">
-                        v1.25.0
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        Planlanan
-                      </Typography>
-                    </Paper>
-                  </Grid>
-                </Grid>
+                      <Paper 
+                        elevation={2}
+                        sx={{ 
+                          p: 2, 
+                          bgcolor: '#fff3e0', 
+                          borderRadius: 2,
+                          textAlign: 'center',
+                          border: '2px solid #ff9800',
+                          transition: 'transform 0.2s',
+                          '&:hover': {
+                            transform: 'scale(1.05)'
+                          }
+                        }}
+                      >
+                        <Typography variant="h6" fontWeight="bold" color="warning.dark">
+                          {latestPublished.version && !latestPublished.version.startsWith('v') ? `v${latestPublished.version}` : latestPublished.version}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Sonraki Versiyon
+                        </Typography>
+                      </Paper>
+                    </Box>
+                  );
+                })()}
               </Box>
             </CardContent>
           </Card>
@@ -1188,7 +1407,7 @@ const CustomerDashboardV2 = () => {
                         <TableCell>
                           <Box>
                             <Typography variant="body1" fontWeight="bold" color="primary.main">
-                              {version.version}
+                              {version.version && !version.version.startsWith('v') ? `v${version.version}` : version.version}
                             </Typography>
                             {version.productName && (
                               <Typography variant="caption" color="text.secondary">

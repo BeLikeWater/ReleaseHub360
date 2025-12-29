@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Paper,
@@ -32,6 +32,11 @@ import {
   List,
   ListItem,
   ListItemText,
+  Tabs,
+  Tab,
+  Checkbox,
+  FormControlLabel,
+  DialogActions,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -43,283 +48,20 @@ import NewReleasesIcon from '@mui/icons-material/NewReleases';
 import InfoIcon from '@mui/icons-material/Info';
 import CloseIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import { collection, getDocs, addDoc } from 'firebase/firestore';
+import AssessmentIcon from '@mui/icons-material/Assessment';
+import CloudIcon from '@mui/icons-material/Cloud';
+import { collection, getDocs, addDoc, query, where, updateDoc, doc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import PullRequestsList from './PullRequestsList';
+import PullRequestListReadyToPublish from './PullRequestListReadyToPublish';
 import PipelineStatusSection from './PipelineStatusSection';
 import PodStatusSection from './PodStatusSection';
+import PRDetailedAnalyze from './PRDetailedAnalyze';
 import ReleaseNotesSection from './ReleaseNotesSection';
-
-// Mock Data - Servisler
-const services = [
-  { id: 1, name: 'cofins-backofficeportal' },
-  { id: 2, name: 'cofins-bff-api' },
-  { id: 3, name: 'cofins-content-service' },
-  { id: 4, name: 'cofins-customerportal' },
-  { id: 5, name: 'cofins-file-service' },
-  { id: 6, name: 'cofins-service-api' },
-  { id: 7, name: 'cofins-worker-service-api' },
-];
-
-// Mock Data - PR'lar
-const mockPRs = [
-  {
-    id: 101,
-    title: 'Feature: Add customer authentication',
-    service: 'cofins-bff-api',
-    branch: 'master',
-    author: 'Ali Yılmaz',
-    date: '2025-11-28',
-    status: 'merged',
-    workItems: [1001, 1002],
-  },
-  {
-    id: 102,
-    title: 'Fix: Update file upload logic',
-    service: 'cofins-file-service',
-    branch: 'master',
-    author: 'Ayşe Kaya',
-    date: '2025-11-29',
-    status: 'merged',
-    workItems: [1003],
-  },
-  {
-    id: 103,
-    title: 'Feature: Content management improvements',
-    service: 'cofins-content-service',
-    branch: 'master',
-    author: 'Mehmet Demir',
-    date: '2025-12-01',
-    status: 'open',
-    workItems: [1004, 1005],
-  },
-  {
-    id: 104,
-    title: 'Fix: Authentication token refresh',
-    service: 'cofins-bff-api',
-    branch: 'master',
-    author: 'Zeynep Öz',
-    date: '2025-12-02',
-    status: 'merged',
-    workItems: [1006],
-  },
-];
-
-// Mock Data - Work Items
-const mockWorkItems = [
-  {
-    id: 1001,
-    title: 'Implement OAuth2 authentication',
-    type: 'User Story',
-    assignedTo: 'Ali Yılmaz',
-    state: 'Done',
-    prIds: [101],
-  },
-  {
-    id: 1002,
-    title: 'Add JWT token validation',
-    type: 'Task',
-    assignedTo: 'Ali Yılmaz',
-    state: 'Done',
-    prIds: [101],
-  },
-  {
-    id: 1003,
-    title: 'Fix file upload size limit',
-    type: 'Bug',
-    assignedTo: 'Ayşe Kaya',
-    state: 'Done',
-    prIds: [102],
-  },
-  {
-    id: 1004,
-    title: 'Content versioning support',
-    type: 'Feature',
-    assignedTo: 'Mehmet Demir',
-    state: 'In Progress',
-    prIds: [103],
-  },
-  {
-    id: 1005,
-    title: 'Add content tagging',
-    type: 'Task',
-    assignedTo: 'Mehmet Demir',
-    state: 'In Progress',
-    prIds: [103],
-  },
-];
-
-// Mock Data - Release Notes
-const mockReleaseNotes = [
-  {
-    workItemId: 1001,
-    note: 'OAuth2 authentication implemented for enhanced security',
-    category: 'Security',
-  },
-  {
-    workItemId: 1002,
-    note: 'JWT token validation added to prevent unauthorized access',
-    category: 'Security',
-  },
-  {
-    workItemId: 1003,
-    note: 'Fixed file upload size limit issue affecting large files',
-    category: 'Bug Fix',
-  },
-  {
-    workItemId: 1004,
-    note: 'Content versioning support added for better content management',
-    category: 'Feature',
-  },
-];
-
-// Mock Data - Değişiklikler
-const mockChanges = [
-  {
-    changeType: 'API Eklendi',
-    apiName: 'validatePayment',
-    microservice: 'cofins-service-api',
-    httpMethod: 'POST',
-    apiPath: '/api/v1/payments/validate',
-    description: 'Ödeme doğrulama API\'si eklendi',
-    breakingChange: false,
-    requestModel: {
-      name: 'PaymentValidationRequest',
-      changes: {
-        added: [
-          { property: 'transactionId', type: 'string', description: 'Transaction ID' },
-          { property: 'amount', type: 'decimal', description: 'Transaction amount' },
-          { property: 'currency', type: 'string', description: 'Currency code (TRY, USD, EUR)' },
-          { property: 'merchantId', type: 'string', description: 'Merchant ID' }
-        ],
-        removed: [],
-        updated: []
-      }
-    },
-    responseModel: {
-      name: 'PaymentValidationResponse',
-      changes: {
-        added: [
-          { property: 'isValid', type: 'boolean', description: 'Validation result' },
-          { property: 'errorCode', type: 'string', description: 'Error code if validation fails' },
-          { property: 'validatedAt', type: 'datetime', description: 'Validation timestamp' }
-        ],
-        removed: [],
-        updated: []
-      }
-    }
-  },
-  {
-    changeType: 'API Güncellendi',
-    apiName: 'authenticateUser',
-    microservice: 'cofins-bff-api',
-    httpMethod: 'POST',
-    apiPath: '/api/v1/auth/login',
-    description: 'Token süresi azaltıldı, refresh token eklendi',
-    breakingChange: true,
-    breakingChangeDetails: 'LoginResponse modelinden sessionId alanı kaldırıldı. Artık refreshToken kullanılmalı.',
-    requestModel: {
-      name: 'LoginRequest',
-      changes: {
-        added: [
-          { property: 'deviceInfo', type: 'object', description: 'Device information for security' },
-          { property: 'rememberMe', type: 'boolean', description: 'Remember me option' }
-        ],
-        removed: [],
-        updated: [
-          { 
-            property: 'username', 
-            oldType: 'string', 
-            newType: 'string', 
-            oldDescription: 'Username', 
-            newDescription: 'Username or email address' 
-          }
-        ]
-      }
-    },
-    responseModel: {
-      name: 'LoginResponse',
-      changes: {
-        added: [
-          { property: 'refreshToken', type: 'string', description: 'Refresh token' },
-          { property: 'expiresIn', type: 'integer', description: 'Token expiry in seconds' }
-        ],
-        removed: [
-          { property: 'sessionId', type: 'string', description: 'Deprecated session ID (BREAKING)' }
-        ],
-        updated: [
-          { 
-            property: 'accessToken', 
-            oldType: 'string', 
-            newType: 'string', 
-            oldDescription: '24-hour JWT token', 
-            newDescription: '8-hour JWT access token' 
-          }
-        ]
-      }
-    }
-  },
-  {
-    changeType: 'API Kaldırıldı',
-    apiName: 'getLegacyCustomerData',
-    microservice: 'cofins-customerportal',
-    httpMethod: 'GET',
-    apiPath: '/api/v1/customers/legacy',
-    description: 'Eski müşteri veri API\'si kaldırıldı',
-    breakingChange: true,
-    breakingChangeDetails: 'API tamamen kaldırıldı. Yeni /api/v2/customers endpoint\'i kullanılmalı.',
-  },
-  {
-    changeType: 'Parametre Güncellendi',
-    parameterName: 'FILE_UPLOAD_SIZE',
-    oldValue: '10 MB',
-    newValue: '50 MB',
-    description: 'Dosya yükleme boyutu limit artırıldı',
-    breakingChange: false,
-  },
-  {
-    changeType: 'Parametre Kaldırıldı',
-    parameterName: 'OLD_ENCRYPTION_KEY',
-    oldValue: 'AES-128',
-    description: 'Eski şifreleme anahtarı kaldırıldı',
-    breakingChange: true,
-    breakingChangeDetails: 'Eski şifreleme anahtarı kaldırıldı. Tüm sistemler yeni AES-256 anahtarını kullanmalı.',
-  },
-  {
-    changeType: 'Tablo Kolonu Eklendi',
-    tableName: 'Customers',
-    columnName: 'risk_score',
-    dataType: 'decimal(5,2)',
-    description: 'Müşteri risk skoru kolonu eklendi',
-    breakingChange: false,
-  },
-  {
-    changeType: 'Tablo Kolonu Kaldırıldı',
-    tableName: 'Transactions',
-    columnName: 'legacy_reference',
-    dataType: 'varchar(50)',
-    description: 'Eski sistem referans kolonu kaldırıldı',
-    breakingChange: true,
-    breakingChangeDetails: 'legacy_reference kolonu kaldırıldı. Artık transaction_id kullanılmalı.',
-  },
-];
-
-// Mock Data - Release ToDo'ları (Yeni Versiyon için)
-const mockReleaseTodos = [
-  {
-    id: 1,
-    description: 'TOGG konusu için yapılması gereken güncellemeler',
-    timing: 'Geçiş Öncesi',
-    responsibleTeam: 'Delivery',
-    priority: 'Yüksek',
-    details: [
-      'Process (ID: 12345) - TOGG süreç tanımları güncellenmeli',
-      'Forms (ID: 67890) - TOGG formları revize edilmeli',
-      'HttpConnector (ID: 11223) - TOGG servis entegrasyonları kontrol edilmeli',
-      'ProcessColumnSettings (ID: 44556) - TOGG kolon ayarları düzenlenmeli'
-    ]
-  },
-];
+import WorkItemsSection from './WorkItemsSection';
+import SystemChangesSection from './SystemChangesSection';
+import ReleaseTodosSection from './ReleaseTodosSection';
+import ServicesNeedingUpdateSection from './ServicesNeedingUpdateSection';
 
 const ReleaseHealthCheckV2 = () => {
   const [products, setProducts] = useState([]);
@@ -334,6 +76,12 @@ const ReleaseHealthCheckV2 = () => {
   const [selectedTodo, setSelectedTodo] = useState(null);
   const [todoDialogOpen, setTodoDialogOpen] = useState(false);
   const [collectedWorkItemIds, setCollectedWorkItemIds] = useState([]);
+  const [prepPodStatus, setPrepPodStatus] = useState([]);
+  const [currentTab, setCurrentTab] = useState(0);
+  const [readyToPublishWorkItemIds, setReadyToPublishWorkItemIds] = useState([]);
+  const [hotfixDialogOpen, setHotfixDialogOpen] = useState(false);
+  const [selectedHotfixServices, setSelectedHotfixServices] = useState([]);
+  const [availableServicesForHotfix, setAvailableServicesForHotfix] = useState([]);
 
   // Firebase'den ürünleri getir
   useEffect(() => {
@@ -346,6 +94,16 @@ const ReleaseHealthCheckV2 = () => {
           productsData.push({ id: doc.id, ...doc.data() });
         });
         setProducts(productsData);
+
+        // Prep ortamı pod status bilgilerini çek
+        try {
+          const podResponse = await fetch('http://localhost:5678/webhook/GetPodStatusPrep');
+          const podData = await podResponse.json();
+          console.log('📦 Prep Pod Status:', podData);
+          setPrepPodStatus(podData);
+        } catch (error) {
+          console.error('Pod status alınırken hata:', error);
+        }
       } catch (error) {
         console.error('Ürünler yüklenirken hata:', error);
       } finally {
@@ -357,10 +115,15 @@ const ReleaseHealthCheckV2 = () => {
 
   const selectedProductData = products.find(p => p.id === selectedProduct);
 
-  const handleWorkItemsCollected = (workItemIds) => {
+  const handleWorkItemsCollected = useCallback((workItemIds) => {
     console.log('📋 Parent: Work Item ID\'leri alındı:', workItemIds);
     setCollectedWorkItemIds(workItemIds);
-  };
+  }, []);
+
+  const handleReadyToPublishWorkItemsCollected = useCallback((workItemIds) => {
+    console.log('📋 Parent: Yayına Hazır PR Work Item ID\'leri alındı:', workItemIds);
+    setReadyToPublishWorkItemIds(workItemIds);
+  }, []);
 
   const toggleService = (serviceId) => {
     setExpandedServices(prev => ({
@@ -374,41 +137,241 @@ const ReleaseHealthCheckV2 = () => {
       alert('Lütfen yeni versiyon numarası girin!');
       return;
     }
-    
+
     if (!selectedProduct || !selectedProductData) {
       alert('Lütfen bir ürün seçin!');
       return;
     }
-    
+
     try {
       console.log('🚀 Yeni versiyon yayınlanıyor...');
       console.log('Product ID:', selectedProduct);
       console.log('Product Name:', selectedProductData.name);
       console.log('New Version:', newVersion);
       console.log('Previous Version:', selectedProductData.currentVersion);
+
+      // Güncelleme bekleyen servisleri topla (releases bilgisi için)
+      const releases = [];
       
-      // Firestore'a productVersions collection'ına kaydet
-      const productVersionsRef = collection(db, 'productVersions');
-      await addDoc(productVersionsRef, {
-        productId: selectedProduct,
-        productName: selectedProductData.name,
-        version: newVersion,
-        previousVersion: selectedProductData.currentVersion || '',
-        createdAt: new Date().toISOString(),
-        createdBy: 'System', // Buraya kullanıcı bilgisi eklenebilir
-        status: 'published'
+      selectedProductData?.childModuleGroups?.forEach((moduleGroup) => {
+        moduleGroup.childModules?.forEach((module) => {
+          module.childApis?.forEach((api) => {
+            // Pod status'u bul
+            const matchingPod = prepPodStatus.find(pod => {
+              if (!api.serviceImageName || !pod.imageName) return false;
+              const imageNameParts = pod.imageName.split('/');
+              const serviceWithTag = imageNameParts[imageNameParts.length - 1];
+              const serviceName = serviceWithTag.split(':')[0];
+              return serviceName === api.serviceImageName;
+            });
+
+            // Eğer pod bulundu VE versiyonlar farklıysa
+            if (matchingPod && matchingPod.currentVersion !== api.currentVersion) {
+              releases.push({
+                releaseName: api.name, // API adı (release ismi)
+                version: matchingPod.currentVersion // Prep ortamındaki versiyon
+              });
+            }
+          });
+        });
       });
+
+      console.log('📦 Güncelleme bekleyen servisler (releases):', releases);
+
+      // Önce bu version'a sahip bir kayıt var mı kontrol et
+      const productVersionsRef = collection(db, 'productVersions');
+      const versionQuery = query(
+        productVersionsRef, 
+        where('productId', '==', selectedProduct),
+        where('version', '==', newVersion)
+      );
       
-      console.log('✅ Versiyon başarıyla kaydedildi');
-      alert(`✅ Başarılı!\n\nYeni versiyon ${newVersion} yayınlandı.\nÖnceki versiyon: ${selectedProductData.currentVersion || 'Yok'}`);
+      const existingVersions = await getDocs(versionQuery);
       
+      if (!existingVersions.empty) {
+        // Kayıt var - güncelle
+        console.log('📝 Mevcut versiyon kaydı bulundu, güncelleniyor...');
+        const existingDoc = existingVersions.docs[0];
+        const docRef = doc(db, 'productVersions', existingDoc.id);
+        
+        await updateDoc(docRef, {
+          status: 'Published',
+          releases: releases,
+          prep: 'Approved',
+          prod: 'PendingApproval',
+          updatedAt: new Date().toISOString(),
+          updatedBy: 'System'
+        });
+        
+        console.log('✅ Versiyon kaydı güncellendi');
+        alert(`✅ Başarılı!\n\nVersiyon ${newVersion} güncellendi ve Published olarak işaretlendi.\n\nGüncelleme bekleyen servis sayısı: ${releases.length}`);
+      } else {
+        // Kayıt yok - yeni kayıt oluştur
+        console.log('📝 Yeni versiyon kaydı oluşturuluyor...');
+        await addDoc(productVersionsRef, {
+          productId: selectedProduct,
+          productName: selectedProductData.name,
+          version: newVersion,
+          previousVersion: selectedProductData.currentVersion || '',
+          releases: releases,
+          prep: 'Approved',
+          prod: 'PendingApproval',
+          createdAt: new Date().toISOString(),
+          createdBy: 'System',
+          status: 'Published'
+        });
+
+        console.log('✅ Yeni versiyon kaydı oluşturuldu');
+        alert(`✅ Başarılı!\n\nYeni versiyon ${newVersion} yayınlandı.\nÖnceki versiyon: ${selectedProductData.currentVersion || 'Yok'}\n\nGüncelleme bekleyen servis sayısı: ${releases.length}`);
+      }
+
       // Input'ı temizle
       setNewVersion('');
-      
+
     } catch (error) {
       console.error('❌ Versiyon yayınlama hatası:', error);
       alert('❌ Hata: ' + error.message);
     }
+  };
+
+  const handleHotfixClick = () => {
+    if (!newVersion) {
+      alert('Lütfen yeni versiyon numarası girin!');
+      return;
+    }
+
+    if (!selectedProduct || !selectedProductData) {
+      alert('Lütfen bir ürün seçin!');
+      return;
+    }
+
+    // Güncelleme bekleyen servisleri topla
+    const services = [];
+    
+    selectedProductData?.childModuleGroups?.forEach((moduleGroup) => {
+      moduleGroup.childModules?.forEach((module) => {
+        module.childApis?.forEach((api) => {
+          // Pod status'u bul
+          const matchingPod = prepPodStatus.find(pod => {
+            if (!api.serviceImageName || !pod.imageName) return false;
+            const imageNameParts = pod.imageName.split('/');
+            const serviceWithTag = imageNameParts[imageNameParts.length - 1];
+            const serviceName = serviceWithTag.split(':')[0];
+            return serviceName === api.serviceImageName;
+          });
+
+          // Eğer pod bulundu VE versiyonlar farklıysa
+          if (matchingPod && matchingPod.currentVersion !== api.currentVersion) {
+            services.push({
+              releaseName: api.name,
+              version: matchingPod.currentVersion,
+              id: `${api.serviceImageName}-${matchingPod.currentVersion}`
+            });
+          }
+        });
+      });
+    });
+
+    if (services.length === 0) {
+      alert('Güncelleme bekleyen servis bulunamadı!');
+      return;
+    }
+
+    setAvailableServicesForHotfix(services);
+    setSelectedHotfixServices([]);
+    setHotfixDialogOpen(true);
+  };
+
+  const handleHotfixPublish = async () => {
+    if (selectedHotfixServices.length === 0) {
+      alert('Lütfen en az bir servis seçin!');
+      return;
+    }
+
+    try {
+      console.log('🔥 Hotfix yayınlanıyor...');
+      
+      // Seçilen servisleri releases formatına çevir
+      const releases = selectedHotfixServices.map(serviceId => {
+        const service = availableServicesForHotfix.find(s => s.id === serviceId);
+        return {
+          releaseName: service.releaseName,
+          version: service.version
+        };
+      });
+
+      // Önce bu version'a sahip bir kayıt var mı kontrol et
+      const productVersionsRef = collection(db, 'productVersions');
+      const versionQuery = query(
+        productVersionsRef, 
+        where('productId', '==', selectedProduct),
+        where('version', '==', newVersion)
+      );
+      
+      const existingVersions = await getDocs(versionQuery);
+      
+      if (!existingVersions.empty) {
+        // Kayıt var - güncelle
+        console.log('📝 Mevcut versiyon kaydı bulundu, hotfix olarak güncelleniyor...');
+        const existingDoc = existingVersions.docs[0];
+        const docRef = doc(db, 'productVersions', existingDoc.id);
+        
+        // Mevcut releases'leri al ve yenileri ekle
+        const currentReleases = existingDoc.data().releases || [];
+        const updatedReleases = [...currentReleases, ...releases];
+        
+        await updateDoc(docRef, {
+          status: 'Published',
+          releases: updatedReleases,
+          isHotfix: true,
+          prep: 'Approved',
+          prod: 'PendingApproval',
+          updatedAt: new Date().toISOString(),
+          updatedBy: 'System'
+        });
+        
+        console.log('✅ Hotfix kaydı güncellendi');
+        alert(`✅ Başarılı!\n\nHotfix ${newVersion} güncellendi.\n\nEklenen servis sayısı: ${releases.length}`);
+      } else {
+        // Kayıt yok - yeni hotfix kaydı oluştur
+        console.log('📝 Yeni hotfix kaydı oluşturuluyor...');
+        await addDoc(productVersionsRef, {
+          productId: selectedProduct,
+          productName: selectedProductData.name,
+          version: newVersion,
+          previousVersion: selectedProductData.currentVersion || '',
+          releases: releases,
+          isHotfix: true,
+          prep: 'Approved',
+          prod: 'PendingApproval',
+          createdAt: new Date().toISOString(),
+          createdBy: 'System',
+          status: 'Published'
+        });
+
+        console.log('✅ Yeni hotfix kaydı oluşturuldu');
+        alert(`✅ Başarılı!\n\nHotfix ${newVersion} yayınlandı.\n\nServis sayısı: ${releases.length}`);
+      }
+
+      // Dialog'u kapat ve input'ı temizle
+      setHotfixDialogOpen(false);
+      setNewVersion('');
+      setSelectedHotfixServices([]);
+
+    } catch (error) {
+      console.error('❌ Hotfix yayınlama hatası:', error);
+      alert('❌ Hata: ' + error.message);
+    }
+  };
+
+  const handleHotfixServiceToggle = (serviceId) => {
+    setSelectedHotfixServices(prev => {
+      if (prev.includes(serviceId)) {
+        return prev.filter(id => id !== serviceId);
+      } else {
+        return [...prev, serviceId];
+      }
+    });
   };
 
   const getStatusColor = (status) => {
@@ -511,641 +474,380 @@ const ReleaseHealthCheckV2 = () => {
                 </FormControl>
               </Grid>
               <Grid item xs={12} md={2}>
-                <Card 
-                  sx={{ 
-                    height: '100%', 
+                <Card
+                  sx={{
+                    height: '100%',
                     background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                     color: 'white',
                     display: 'flex',
                     alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <CardContent sx={{ textAlign: 'center', py: 1 }}>
-                <Typography variant="caption" sx={{ opacity: 0.9, display: 'block' }}>
-                  Mevcut Versiyon
-                </Typography>
-                <Typography variant="h5" sx={{ fontWeight: 'bold', mt: 0.5 }}>
-                  {selectedProductData?.currentVersion ? `v${selectedProductData.currentVersion}` : '-'}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} md={2}>
-            <Card 
-              sx={{ 
-                height: '100%', 
-                background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
-                color: 'white',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <CardContent sx={{ textAlign: 'center', py: 1 }}>
-                <Typography variant="caption" sx={{ opacity: 0.9, display: 'block' }}>
-                  Versiyon Oluşturulma Tarihi
-                </Typography>
-                <Typography variant="h6" sx={{ fontWeight: 'bold', mt: 0.5 }}>
-                  {selectedProductData?.currentVersionCreatedAt 
-                    ? new Date(selectedProductData.currentVersionCreatedAt).toLocaleDateString('tr-TR', {
-                        year: 'numeric',
-                        month: '2-digit',
-                        day: '2-digit'
-                      })
-                    : '-'
-                  }
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} md={1}>
-            <Divider orientation="vertical" sx={{ height: '100%', mx: 2 }} />
-          </Grid>
-          <Grid item xs={12} md={2}>
-            <TextField
-              fullWidth
-              label="Yeni Versiyon"
-              value={newVersion}
-              onChange={(e) => setNewVersion(e.target.value)}
-              placeholder="örn: 1.2.0"
-              InputProps={{
-                startAdornment: <NewReleasesIcon sx={{ mr: 1, color: 'primary.main' }} />,
-              }}
-            />
-          </Grid>
-          <Grid item xs={12} md={2}>
-            <Button
-              fullWidth
-              variant="contained"
-              color="success"
-              size="large"
-              startIcon={<PublishIcon />}
-              onClick={handlePublish}
-              disabled={!newVersion || !selectedProduct}
-              sx={{ height: '56px' }}
-            >
-              Yayınla
-            </Button>
-          </Grid>
-        </Grid>
-      </Paper>
+                    justifyContent: 'center',
+                  }}
+                >
+                  <CardContent sx={{ textAlign: 'center', py: 1 }}>
+                    <Typography variant="caption" sx={{ opacity: 0.9, display: 'block' }}>
+                      Mevcut Versiyon
+                    </Typography>
+                    <Typography variant="h5" sx={{ fontWeight: 'bold', mt: 0.5 }}>
+                      {selectedProductData?.currentVersion ? `v${selectedProductData.currentVersion}` : '-'}
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={12} md={2}>
+                <Card
+                  sx={{
+                    height: '100%',
+                    background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+                    color: 'white',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <CardContent sx={{ textAlign: 'center', py: 1 }}>
+                    <Typography variant="caption" sx={{ opacity: 0.9, display: 'block' }}>
+                      Versiyon Oluşturulma Tarihi
+                    </Typography>
+                    <Typography variant="h6" sx={{ fontWeight: 'bold', mt: 0.5 }}>
+                      {selectedProductData?.currentVersionCreatedAt
+                        ? new Date(selectedProductData.currentVersionCreatedAt).toLocaleDateString('tr-TR', {
+                          year: 'numeric',
+                          month: '2-digit',
+                          day: '2-digit'
+                        })
+                        : '-'
+                      }
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={12} md={1}>
+                <Divider orientation="vertical" sx={{ height: '100%', mx: 2 }} />
+              </Grid>
+              <Grid item xs={12} md={2}>
+                <TextField
+                  fullWidth
+                  label="Yeni Versiyon"
+                  value={newVersion}
+                  onChange={(e) => setNewVersion(e.target.value)}
+                  placeholder="örn: 1.2.0"
+                  InputProps={{
+                    startAdornment: <NewReleasesIcon sx={{ mr: 1, color: 'primary.main' }} />,
+                  }}
+                />
+              </Grid>
+              <Grid item xs={12} md={2}>
+                <Button
+                  fullWidth
+                  variant="contained"
+                  color="success"
+                  size="large"
+                  startIcon={<PublishIcon />}
+                  onClick={handlePublish}
+                  disabled={!newVersion || !selectedProduct}
+                  sx={{ height: '56px' }}
+                >
+                  Yayınla
+                </Button>
+              </Grid>
+              <Grid item xs={12} md={2}>
+                <Button
+                  fullWidth
+                  variant="contained"
+                  color="error"
+                  size="large"
+                  startIcon={<WarningIcon />}
+                  onClick={handleHotfixClick}
+                  disabled={!newVersion || !selectedProduct}
+                  sx={{ height: '56px' }}
+                >
+                  Hotfix Yayınla
+                </Button>
+              </Grid>
+            </Grid>
+          </Paper>
 
-      {!selectedProduct && (
-        <Alert severity="info" sx={{ mb: 3 }}>
-          Lütfen bir ürün grubu seçin.
-        </Alert>
-      )}
+          {!selectedProduct && (
+            <Alert severity="info" sx={{ mb: 3 }}>
+              Lütfen bir ürün grubu seçin.
+            </Alert>
+          )}
 
-      {selectedProduct && (
-        <>
-          {/* Aşama 1: Son tarihten bugüne atılan PR'lar */}
-          <PullRequestsList 
-            selectedProduct={selectedProduct} 
-            selectedProductData={selectedProductData}
-            onWorkItemsCollected={handleWorkItemsCollected}
-          />
-
-          {/* Aşama 2: Her bir servis için son tetiklenen pipeline'lar */}
-          <PipelineStatusSection 
-            selectedProduct={selectedProduct} 
-            selectedProductData={selectedProductData} 
-          />
-
-          {/* Pod Durumları */}
-          <PodStatusSection 
-            selectedProduct={selectedProduct} 
-            selectedProductData={selectedProductData} 
-          />
-
-          {/* Aşama 4: Work Item'lara ait release note'lar */}
-          <ReleaseNotesSection workItemIds={collectedWorkItemIds} />
-
-          {/* Aşama 5: Work Item'lara ait yapılan değişiklikler */}
-          <Accordion defaultExpanded sx={{ mt: 2 }}>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <CheckCircleIcon color="primary" />
-                <Typography variant="h6">
-                  Sistem Değişiklikleri ({mockChanges.length})
-                </Typography>
-                {mockChanges.some(c => c.breakingChange) && (
-                  <Chip
-                    icon={<WarningIcon />}
-                    label="Breaking Changes Var!"
-                    color="error"
-                    size="small"
+          {selectedProduct && (
+            <>
+              {/* Tab Navigation */}
+              <Paper sx={{ mb: 3 }}>
+                <Tabs
+                  value={currentTab}
+                  onChange={(e, newValue) => setCurrentTab(newValue)}
+                  variant="fullWidth"
+                  sx={{ borderBottom: 1, borderColor: 'divider' }}
+                >
+                  <Tab
+                    label={
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <PublishIcon />
+                        <Typography>Yayına Hazır Paket</Typography>
+                      </Box>
+                    }
                   />
-                )}
+                  <Tab
+                    label={
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <InfoIcon />
+                        <Typography>Devam Eden Geliştirmeler</Typography>
+                      </Box>
+                    }
+                  />
+                </Tabs>
+              </Paper>
+
+              {/* Tab 0: Yayına Hazır Paket (Prep → Prod) */}
+              <Box sx={{ display: currentTab === 0 ? 'block' : 'none' }}>
+                <ServicesNeedingUpdateSection 
+                  selectedProductData={selectedProductData}
+                  prepPodStatus={prepPodStatus}
+                />
+
+                {/* Yayınlanmaya Hazır PR'lar */}
+                <PullRequestListReadyToPublish
+                  selectedProduct={selectedProduct}
+                  selectedProductData={selectedProductData}
+                  prepPodStatus={prepPodStatus}
+                  onWorkItemsCollected={handleReadyToPublishWorkItemsCollected}
+                />
+
+                {/* Work Items - Yayına Hazır Paket */}
+                <WorkItemsSection
+                  selectedProduct={selectedProduct}
+                  selectedProductData={selectedProductData}
+                  workItemIds={readyToPublishWorkItemIds}
+                />
+
+                {/* Release Notes - Yayına Hazır Paket */}
+                <ReleaseNotesSection workItemIds={readyToPublishWorkItemIds} />
+
+                {/* Sistem Değişiklikleri - Yayına Hazır Paket */}
+                <SystemChangesSection />
+
+                {/* Release ToDo'lar - Yayına Hazır Paket */}
+                <ReleaseTodosSection />
               </Box>
-            </AccordionSummary>
-            <AccordionDetails>
-              <TableContainer>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow sx={{ bgcolor: '#1976d2' }}>
-                      <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Değişiklik Tipi</TableCell>
-                      <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Detay</TableCell>
-                      <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Açıklama</TableCell>
-                      <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Model Detayı</TableCell>
-                      <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Breaking Change</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {mockChanges.map((change, idx) => (
-                      <TableRow 
-                        key={idx} 
-                        hover
-                        sx={{ 
-                          bgcolor: change.breakingChange ? 'rgba(211, 47, 47, 0.08)' : 'inherit'
+
+              {/* Tab 1: Devam Eden Geliştirmeler */}
+              <Box sx={{ display: currentTab === 1 ? 'block' : 'none' }}>
+                {/* Aşama 1: Son tarihten bugüne atılan PR'lar */}
+                <PullRequestsList
+                  selectedProduct={selectedProduct}
+                  selectedProductData={selectedProductData}
+                  onWorkItemsCollected={handleWorkItemsCollected}
+                />
+
+                {/* Aşama 2: Her bir servis için son tetiklenen pipeline'lar */}
+                <PipelineStatusSection
+                  selectedProduct={selectedProduct}
+                  selectedProductData={selectedProductData}
+                />
+
+                {/* Pod Durumları */}
+                <PodStatusSection
+                  selectedProduct={selectedProduct}
+                  selectedProductData={selectedProductData}
+                />
+
+                {/* PR Detailed Analyze Section */}
+                <Box sx={{ mt: 2 }}>
+                  <PRDetailedAnalyze />
+                </Box>
+              </Box>
+            </>
+          )}
+
+          {/* ToDo/Pod Detay Dialog */}
+          <Dialog
+            open={todoDialogOpen}
+            onClose={() => setTodoDialogOpen(false)}
+            maxWidth="md"
+            fullWidth
+          >
+            <DialogTitle>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography variant="h6">
+                  {selectedTodo?.logs ? 'Pod Hata Detayları' : 'ToDo Detayları'}
+                </Typography>
+                <IconButton onClick={() => setTodoDialogOpen(false)}>
+                  <CloseIcon />
+                </IconButton>
+              </Box>
+            </DialogTitle>
+            <DialogContent dividers>
+              {selectedTodo && (
+                <Box>
+                  <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                    {selectedTodo.description}
+                  </Typography>
+
+                  {/* Todo details */}
+                  {selectedTodo.timing && (
+                    <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+                      <Chip
+                        label={selectedTodo.timing}
+                        size="small"
+                        sx={{
+                          backgroundColor: getTimingColor(selectedTodo.timing),
+                          color: 'white'
+                        }}
+                      />
+                      <Chip
+                        label={selectedTodo.responsibleTeam}
+                        size="small"
+                        sx={{
+                          backgroundColor: getTeamColor(selectedTodo.responsibleTeam),
+                          color: 'white'
+                        }}
+                      />
+                      <Chip
+                        label={selectedTodo.priority}
+                        color={getPriorityColor(selectedTodo.priority)}
+                        size="small"
+                      />
+                    </Box>
+                  )}
+
+                  {/* Pod error details */}
+                  {selectedTodo.logs && (
+                    <Box>
+                      <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+                        <Chip
+                          label={`Versiyon: ${selectedTodo.version}`}
+                          size="small"
+                          variant="outlined"
+                        />
+                        <Chip
+                          label={selectedTodo.podStatus}
+                          size="small"
+                          color="error"
+                        />
+                        <Chip
+                          label={`Replicas: ${selectedTodo.replicas}`}
+                          size="small"
+                          variant="outlined"
+                        />
+                        <Chip
+                          label={`Restart: ${selectedTodo.restartCount}`}
+                          size="small"
+                          color={selectedTodo.restartCount > 3 ? 'error' : 'warning'}
+                        />
+                      </Box>
+
+                      <Divider sx={{ my: 2 }} />
+
+                      <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
+                        Hata Logları:
+                      </Typography>
+                      <Paper
+                        variant="outlined"
+                        sx={{
+                          p: 2,
+                          bgcolor: '#f5f5f5',
+                          fontFamily: 'monospace',
+                          fontSize: '0.875rem',
+                          whiteSpace: 'pre-wrap',
+                          maxHeight: '400px',
+                          overflow: 'auto'
                         }}
                       >
-                        <TableCell>
-                          <Chip 
-                            label={change.changeType} 
-                            size="small" 
-                            color={
-                              change.changeType.includes('Eklendi') ? 'success' :
-                              change.changeType.includes('Kaldırıldı') ? 'error' :
-                              'warning'
-                            }
-                          />
-                        </TableCell>
-                        <TableCell>
-                          {change.apiName && (
-                            <Box>
-                              <Typography variant="body2" fontWeight="bold">
-                                {change.apiName}
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                {change.httpMethod} {change.apiPath}
-                              </Typography>
-                              <br />
-                              <Chip label={change.microservice} size="small" variant="outlined" sx={{ mt: 0.5 }} />
-                            </Box>
-                          )}
-                          {change.parameterName && (
-                            <Box>
-                              <Typography variant="body2" fontWeight="bold">
-                                {change.parameterName}
-                              </Typography>
-                              {change.oldValue && (
-                                <Typography variant="caption" color="text.secondary">
-                                  {change.oldValue} → {change.newValue}
-                                </Typography>
-                              )}
-                            </Box>
-                          )}
-                          {change.tableName && (
-                            <Box>
-                              <Typography variant="body2" fontWeight="bold">
-                                {change.tableName}.{change.columnName}
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                {change.dataType}
-                              </Typography>
-                            </Box>
-                          )}
-                        </TableCell>
-                        <TableCell>{change.description}</TableCell>
-                        <TableCell align="center">
-                          {(change.requestModel || change.responseModel) ? (
-                            <Box sx={{ display: 'flex', gap: 0.5 }}>
-                              {change.requestModel && (
-                                <IconButton 
-                                  size="small" 
-                                  color="primary"
-                                  onClick={() => {
-                                    setSelectedModel(change.requestModel);
-                                    setSelectedModelType('request');
-                                    setModelDialogOpen(true);
-                                  }}
-                                >
-                                  <InfoIcon />
-                                </IconButton>
-                              )}
-                              {change.responseModel && (
-                                <IconButton 
-                                  size="small" 
-                                  color="secondary"
-                                  onClick={() => {
-                                    setSelectedModel(change.responseModel);
-                                    setSelectedModelType('response');
-                                    setModelDialogOpen(true);
-                                  }}
-                                >
-                                  <InfoIcon />
-                                </IconButton>
-                              )}
-                            </Box>
-                          ) : (
-                            <Typography variant="body2" color="text.secondary">-</Typography>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {change.breakingChange ? (
-                            <Box>
-                              <Chip
-                                icon={<ErrorIcon />}
-                                label="BREAKING"
-                                color="error"
-                                size="small"
-                              />
-                              {change.breakingChangeDetails && (
-                                <Typography variant="caption" display="block" sx={{ mt: 1, color: 'error.main' }}>
-                                  {change.breakingChangeDetails}
-                                </Typography>
-                              )}
-                            </Box>
-                          ) : (
-                            <Chip label="Normal" size="small" color="success" />
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
+                        {selectedTodo.logs}
+                      </Paper>
+                    </Box>
+                  )}
 
-              {/* Breaking Changes Özet */}
-              {mockChanges.some(c => c.breakingChange) && (
-                <Alert severity="error" sx={{ mt: 2 }}>
-                  <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
-                    ⚠️ Breaking Changes Tespit Edildi!
-                  </Typography>
-                  <Typography variant="body2">
-                    Bu release {mockChanges.filter(c => c.breakingChange).length} adet breaking change içermektedir.
-                    Lütfen deployment öncesi gerekli migrasyonları ve testleri yapınız.
-                  </Typography>
-                </Alert>
+                  {/* Todo task list */}
+                  {selectedTodo.details && (
+                    <>
+                      <Divider sx={{ my: 2 }} />
+                      <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
+                        Yapılması Gereken Güncellemeler:
+                      </Typography>
+                      <List>
+                        {selectedTodo.details.map((detail, index) => (
+                          <ListItem key={index} sx={{ py: 0.5 }}>
+                            <ListItemText
+                              primary={detail}
+                              primaryTypographyProps={{ variant: 'body2' }}
+                            />
+                          </ListItem>
+                        ))}
+                      </List>
+                    </>
+                  )}
+                </Box>
               )}
-            </AccordionDetails>
-          </Accordion>
+            </DialogContent>
+          </Dialog>
 
-          {/* Release ToDo'lar */}
-          <Accordion defaultExpanded>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <Typography variant="h6">Release ToDo'lar (Yeni Versiyon)</Typography>
-                <Chip 
-                  label={`${mockReleaseTodos.length} görev`} 
-                  size="small" 
-                  color="warning"
-                />
-              </Box>
-            </AccordionSummary>
-            <AccordionDetails>
-              <TableContainer>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Açıklama</TableCell>
-                      <TableCell>Zaman</TableCell>
-                      <TableCell>Ekip</TableCell>
-                      <TableCell>Öncelik</TableCell>
-                      <TableCell align="center">Detay</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {mockReleaseTodos.map((todo) => (
-                      <TableRow key={todo.id}>
-                        <TableCell>
-                          <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-                            {todo.description}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Chip 
-                            label={todo.timing} 
-                            size="small"
-                            sx={{ 
-                              backgroundColor: getTimingColor(todo.timing),
-                              color: 'white'
-                            }}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Chip 
-                            label={todo.responsibleTeam} 
-                            size="small"
-                            sx={{ 
-                              backgroundColor: getTeamColor(todo.responsibleTeam),
-                              color: 'white'
-                            }}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Chip 
-                            label={todo.priority} 
-                            color={getPriorityColor(todo.priority)} 
-                            size="small" 
-                          />
-                        </TableCell>
-                        <TableCell align="center">
-                          <IconButton 
-                            size="small" 
-                            color="primary"
-                            onClick={() => {
-                              setSelectedTodo(todo);
-                              setTodoDialogOpen(true);
-                            }}
-                          >
-                            <InfoIcon />
-                          </IconButton>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-
-              {/* Kritik ToDo Uyarısı */}
-              {mockReleaseTodos.some(t => t.priority === 'Kritik') && (
-                <Alert severity="error" sx={{ mt: 2 }}>
-                  <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
-                    🚨 Kritik ToDo'lar!
-                  </Typography>
-                  <Typography variant="body2">
-                    {mockReleaseTodos.filter(t => t.priority === 'Kritik').length} adet kritik görev bulunuyor.
-                    Bu görevler yeni versiyon yayınlanmadan önce mutlaka tamamlanmalıdır.
-                  </Typography>
-                </Alert>
-              )}
-            </AccordionDetails>
-          </Accordion>
-        </>
-      )}
-
-      {/* ToDo/Pod Detay Dialog */}
-      <Dialog 
-        open={todoDialogOpen} 
-        onClose={() => setTodoDialogOpen(false)}
-        maxWidth="md"
-        fullWidth
-      >
-        <DialogTitle>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography variant="h6">
-              {selectedTodo?.logs ? 'Pod Hata Detayları' : 'ToDo Detayları'}
-            </Typography>
-            <IconButton onClick={() => setTodoDialogOpen(false)}>
-              <CloseIcon />
-            </IconButton>
-          </Box>
-        </DialogTitle>
-        <DialogContent dividers>
-          {selectedTodo && (
-            <Box>
-              <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
-                {selectedTodo.description}
+          {/* Hotfix Servis Seçim Dialog */}
+          <Dialog
+            open={hotfixDialogOpen}
+            onClose={() => setHotfixDialogOpen(false)}
+            maxWidth="md"
+            fullWidth
+          >
+            <DialogTitle>
+              Hotfix için Servis Seçin
+              <Typography variant="caption" display="block" color="text.secondary">
+                Güncelleme bekleyen servislerden hotfix'e dahil edilecekleri seçin
               </Typography>
-              
-              {/* Todo details */}
-              {selectedTodo.timing && (
-                <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
-                  <Chip 
-                    label={selectedTodo.timing} 
-                    size="small"
-                    sx={{ 
-                      backgroundColor: getTimingColor(selectedTodo.timing),
-                      color: 'white'
-                    }}
-                  />
-                  <Chip 
-                    label={selectedTodo.responsibleTeam} 
-                    size="small"
-                    sx={{ 
-                      backgroundColor: getTeamColor(selectedTodo.responsibleTeam),
-                      color: 'white'
-                    }}
-                  />
-                  <Chip 
-                    label={selectedTodo.priority} 
-                    color={getPriorityColor(selectedTodo.priority)} 
-                    size="small" 
-                  />
-                </Box>
-              )}
-
-              {/* Pod error details */}
-              {selectedTodo.logs && (
-                <Box>
-                  <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
-                    <Chip 
-                      label={`Versiyon: ${selectedTodo.version}`} 
-                      size="small"
-                      variant="outlined"
-                    />
-                    <Chip 
-                      label={selectedTodo.podStatus} 
-                      size="small"
-                      color="error"
-                    />
-                    <Chip 
-                      label={`Replicas: ${selectedTodo.replicas}`} 
-                      size="small"
-                      variant="outlined"
-                    />
-                    <Chip 
-                      label={`Restart: ${selectedTodo.restartCount}`} 
-                      size="small"
-                      color={selectedTodo.restartCount > 3 ? 'error' : 'warning'}
-                    />
-                  </Box>
-
-                  <Divider sx={{ my: 2 }} />
-
-                  <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
-                    Hata Logları:
-                  </Typography>
-                  <Paper 
-                    variant="outlined" 
-                    sx={{ 
-                      p: 2, 
-                      bgcolor: '#f5f5f5',
-                      fontFamily: 'monospace',
-                      fontSize: '0.875rem',
-                      whiteSpace: 'pre-wrap',
-                      maxHeight: '400px',
-                      overflow: 'auto'
-                    }}
-                  >
-                    {selectedTodo.logs}
-                  </Paper>
-                </Box>
-              )}
-
-              {/* Todo task list */}
-              {selectedTodo.details && (
-                <>
-                  <Divider sx={{ my: 2 }} />
-                  <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
-                    Yapılması Gereken Güncellemeler:
-                  </Typography>
-                  <List>
-                    {selectedTodo.details.map((detail, index) => (
-                      <ListItem key={index} sx={{ py: 0.5 }}>
-                        <ListItemText 
-                          primary={detail}
-                          primaryTypographyProps={{ variant: 'body2' }}
+            </DialogTitle>
+            <DialogContent>
+              <List>
+                {availableServicesForHotfix.map((service) => (
+                  <ListItem key={service.id} dense>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={selectedHotfixServices.includes(service.id)}
+                          onChange={() => handleHotfixServiceToggle(service.id)}
                         />
-                      </ListItem>
-                    ))}
-                  </List>
-                </>
-              )}
-            </Box>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Model Changes Dialog */}
-      <Dialog 
-        open={modelDialogOpen} 
-        onClose={() => setModelDialogOpen(false)}
-        maxWidth="md"
-        fullWidth
-      >
-        <DialogTitle>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography variant="h6">
-              {selectedModelType === 'request' ? 'Request Model' : 'Response Model'} Değişiklikleri
-            </Typography>
-            <IconButton onClick={() => setModelDialogOpen(false)}>
-              <CloseIcon />
-            </IconButton>
-          </Box>
-        </DialogTitle>
-        <DialogContent dividers>
-          {selectedModel && (
-            <Box>
-              <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
-                {selectedModel.name}
-              </Typography>
-
-              {/* Added Properties */}
-              {selectedModel.changes.added && selectedModel.changes.added.length > 0 && (
-                <Box sx={{ mb: 3 }}>
-                  <Typography variant="subtitle2" fontWeight="bold" gutterBottom color="success.main">
-                    ✅ Eklenen Alanlar ({selectedModel.changes.added.length})
-                  </Typography>
-                  <TableContainer component={Paper} variant="outlined">
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell sx={{ fontWeight: 'bold' }}>Alan Adı</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold' }}>Tip</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold' }}>Açıklama</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {selectedModel.changes.added.map((prop, idx) => (
-                          <TableRow key={idx} sx={{ bgcolor: '#e8f5e9' }}>
-                            <TableCell sx={{ fontFamily: 'monospace' }}>{prop.property}</TableCell>
-                            <TableCell>
-                              <Chip label={prop.type} size="small" color="success" />
-                            </TableCell>
-                            <TableCell>{prop.description}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                </Box>
-              )}
-
-              {/* Removed Properties */}
-              {selectedModel.changes.removed && selectedModel.changes.removed.length > 0 && (
-                <Box sx={{ mb: 3 }}>
-                  <Typography variant="subtitle2" fontWeight="bold" gutterBottom color="error.main">
-                    ❌ Kaldırılan Alanlar ({selectedModel.changes.removed.length}) - BREAKING CHANGE
-                  </Typography>
-                  <TableContainer component={Paper} variant="outlined">
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell sx={{ fontWeight: 'bold' }}>Alan Adı</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold' }}>Tip</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold' }}>Açıklama</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {selectedModel.changes.removed.map((prop, idx) => (
-                          <TableRow key={idx} sx={{ bgcolor: '#ffebee' }}>
-                            <TableCell sx={{ fontFamily: 'monospace', textDecoration: 'line-through' }}>
-                              {prop.property}
-                            </TableCell>
-                            <TableCell>
-                              <Chip label={prop.type} size="small" color="error" />
-                            </TableCell>
-                            <TableCell>{prop.description}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                </Box>
-              )}
-
-              {/* Updated Properties */}
-              {selectedModel.changes.updated && selectedModel.changes.updated.length > 0 && (
-                <Box sx={{ mb: 3 }}>
-                  <Typography variant="subtitle2" fontWeight="bold" gutterBottom color="warning.main">
-                    🔄 Güncellenen Alanlar ({selectedModel.changes.updated.length})
-                  </Typography>
-                  <TableContainer component={Paper} variant="outlined">
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell sx={{ fontWeight: 'bold' }}>Alan Adı</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold' }}>Eski → Yeni</TableCell>
-                          <TableCell sx={{ fontWeight: 'bold' }}>Açıklama Değişimi</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {selectedModel.changes.updated.map((prop, idx) => (
-                          <TableRow key={idx} sx={{ bgcolor: '#fff3e0' }}>
-                            <TableCell sx={{ fontFamily: 'monospace' }}>{prop.property}</TableCell>
-                            <TableCell>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <Chip label={prop.oldType} size="small" variant="outlined" />
-                                <Typography variant="caption">→</Typography>
-                                <Chip label={prop.newType} size="small" color="warning" />
-                              </Box>
-                            </TableCell>
-                            <TableCell>
-                              <Typography variant="caption" display="block" color="text.secondary">
-                                Eski: {prop.oldDescription}
-                              </Typography>
-                              <Typography variant="caption" display="block" color="text.primary">
-                                Yeni: {prop.newDescription}
-                              </Typography>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                </Box>
-              )}
-
-              {/* Warning for breaking changes */}
-              {selectedModel.changes.removed && selectedModel.changes.removed.length > 0 && (
-                <Alert severity="error">
-                  <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
-                    ⚠️ Breaking Change Uyarısı
-                  </Typography>
-                  <Typography variant="body2">
-                    Bu modelden {selectedModel.changes.removed.length} alan kaldırıldı. 
-                    Mevcut entegrasyonlar güncellenmeli ve testler yapılmalıdır.
-                  </Typography>
+                      }
+                      label={
+                        <Box>
+                          <Typography variant="body2" fontWeight="bold">
+                            {service.releaseName}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Versiyon: {service.version}
+                          </Typography>
+                        </Box>
+                      }
+                    />
+                  </ListItem>
+                ))}
+              </List>
+              {availableServicesForHotfix.length === 0 && (
+                <Alert severity="info">
+                  Güncelleme bekleyen servis bulunamadı.
                 </Alert>
               )}
-            </Box>
-          )}
-        </DialogContent>
-      </Dialog>
-      </>
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setHotfixDialogOpen(false)}>
+                İptal
+              </Button>
+              <Button
+                onClick={handleHotfixPublish}
+                variant="contained"
+                color="error"
+                disabled={selectedHotfixServices.length === 0}
+                startIcon={<PublishIcon />}
+              >
+                Hotfix Yayınla ({selectedHotfixServices.length} servis)
+              </Button>
+            </DialogActions>
+          </Dialog>
+
+        </>
       )}
     </Box>
   );

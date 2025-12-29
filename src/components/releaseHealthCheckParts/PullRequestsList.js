@@ -231,7 +231,7 @@ const PullRequestsList = ({ selectedProduct, selectedProductData, onWorkItemsCol
 
   return (
     <>
-    <Accordion defaultExpanded>
+    <Accordion>
       <AccordionSummary expandIcon={<ExpandMoreIcon />}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
           <CheckCircleIcon color="primary" />

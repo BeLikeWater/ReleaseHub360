@@ -45,7 +45,7 @@ import {
 import { useNavigate, useLocation } from 'react-router-dom';
 
 const Layout = ({ children }) => {
-  const [drawerOpen, setDrawerOpen] = useState(true);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [customerDashboardOpen, setCustomerDashboardOpen] = useState(false);
   const [customerDashboardV2Open, setCustomerDashboardV2Open] = useState(false);
   const [releaseManagementOpen, setReleaseManagementOpen] = useState(false);
@@ -62,7 +62,7 @@ const Layout = ({ children }) => {
 
   const customerDashboardItems = [
     { text: 'Dashboard Özet', icon: <DashboardIcon />, path: '/customer-dashboard' },
-    { text: 'Release\'ler', icon: <ReleasesIcon />, path: '/releases' },
+    { text: 'Release\'ler', icon: <ReleasesIcon />, path: '/releases_old' },
     { text: 'Todo Listesi', icon: <TodoIcon />, path: '/todo-list' },
     { text: 'Değişiklik Takibi', icon: <ChangeTrackingIcon />, path: '/change-tracking' },
     { text: 'Sorun Bildir', icon: <BugReportIcon />, path: '/report-issue' },

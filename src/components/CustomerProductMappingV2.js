@@ -31,6 +31,7 @@ import {
   List,
   ListItem,
   Divider,
+  TextField,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -54,6 +55,7 @@ const CustomerProductMappingV2 = () => {
   
   const [selectedCustomer, setSelectedCustomer] = useState('');
   const [selectedProduct, setSelectedProduct] = useState('');
+  const [selectedVersion, setSelectedVersion] = useState('');
   const [selectedModuleGroups, setSelectedModuleGroups] = useState([]);
   const [selectedModules, setSelectedModules] = useState([]);
   
@@ -172,6 +174,7 @@ const CustomerProductMappingV2 = () => {
       setCurrentMapping(mapping);
       setSelectedCustomer(mapping.customerId);
       setSelectedProduct(mapping.productId);
+      setSelectedVersion(mapping.version || '');
       setSelectedModuleGroups(mapping.moduleGroupIds || []);
       setSelectedModules(mapping.moduleIds || []);
     } else {
@@ -179,6 +182,7 @@ const CustomerProductMappingV2 = () => {
       setCurrentMapping(null);
       setSelectedCustomer('');
       setSelectedProduct('');
+      setSelectedVersion('');
       setSelectedModuleGroups([]);
       setSelectedModules([]);
       setAvailableModuleGroups([]);
@@ -193,6 +197,7 @@ const CustomerProductMappingV2 = () => {
     setCurrentMapping(null);
     setSelectedCustomer('');
     setSelectedProduct('');
+    setSelectedVersion('');
     setSelectedModuleGroups([]);
     setSelectedModules([]);
     setAvailableModuleGroups([]);
@@ -209,6 +214,7 @@ const CustomerProductMappingV2 = () => {
       const mappingData = {
         customerId: selectedCustomer,
         productId: selectedProduct,
+        version: selectedVersion || '',
         moduleGroupIds: selectedModuleGroups,
         moduleIds: selectedModules,
         createdAt: editMode ? currentMapping.createdAt : new Date().toISOString(),
@@ -414,12 +420,21 @@ const CustomerProductMappingV2 = () => {
                       <TableCell>
                         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                           {customerMappings.map((mapping) => (
-                            <Chip
-                              key={mapping.id}
-                              label={getProductName(mapping.productId)}
-                              color="primary"
-                              size="small"
-                            />
+                            <Box key={mapping.id} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                              <Chip
+                                label={getProductName(mapping.productId)}
+                                color="primary"
+                                size="small"
+                              />
+                              {mapping.version && (
+                                <Chip
+                                  label={mapping.version}
+                                  color="success"
+                                  size="small"
+                                  variant="outlined"
+                                />
+                              )}
+                            </Box>
                           ))}
                           {customerMappings.length === 0 && (
                             <Typography variant="body2" color="text.secondary">
@@ -451,11 +466,21 @@ const CustomerProductMappingV2 = () => {
                                       <Card variant="outlined" sx={{ borderLeft: `4px solid ${productColor}` }}>
                                         <CardContent>
                                           <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-                                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                              <CategoryIcon sx={{ color: productColor }} />
-                                              <Typography variant="h6" sx={{ color: productColor, fontWeight: 'bold' }}>
-                                                {getProductName(mapping.productId)}
-                                              </Typography>
+                                            <Box>
+                                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                                                <CategoryIcon sx={{ color: productColor }} />
+                                                <Typography variant="h6" sx={{ color: productColor, fontWeight: 'bold' }}>
+                                                  {getProductName(mapping.productId)}
+                                                </Typography>
+                                              </Box>
+                                              {mapping.version && (
+                                                <Chip
+                                                  label={`Versiyon: ${mapping.version}`}
+                                                  color="success"
+                                                  size="small"
+                                                  variant="outlined"
+                                                />
+                                              )}
                                             </Box>
                                             <Box>
                                               <IconButton
@@ -590,6 +615,18 @@ const CustomerProductMappingV2 = () => {
                   ))}
                 </Select>
               </FormControl>
+            )}
+
+            {/* Versiyon Girişi */}
+            {selectedProduct && (
+              <TextField
+                fullWidth
+                label="Versiyon"
+                value={selectedVersion}
+                onChange={(e) => setSelectedVersion(e.target.value)}
+                placeholder="örn: v1.23.0"
+                helperText="Bu müşteriye atanan ürün versiyonu"
+              />
             )}
 
             {/* Modül Grubu Seçimi (Multi Select) */}

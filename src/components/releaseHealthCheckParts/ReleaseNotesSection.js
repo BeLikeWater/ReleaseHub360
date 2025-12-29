@@ -97,15 +97,17 @@ const ReleaseNotesSection = ({ workItemIds }) => {
         return;
       }
       
-      const emptyWorkItemIds = emptyNotes.map(note => note.workitemId);
-      console.log(`📋 Boş olan ${emptyWorkItemIds.length} work item bulundu:`, emptyWorkItemIds);
+      // Sadece ilk 2 tanesini al
+      const notesToProcess = emptyNotes.slice(0, 2);
+      const emptyWorkItemIds = notesToProcess.map(note => note.workitemId);
+      console.log(`📋 İlk ${emptyWorkItemIds.length} boş work item işlenecek (toplam ${emptyNotes.length} boş kayıt var):`, emptyWorkItemIds);
       
       // API'ye gönder
       const workItemIdsString = JSON.stringify(emptyWorkItemIds);
       const url = `http://localhost:5678/webhook/GenerateReleaseNotes?workitemIds=${encodeURIComponent(workItemIdsString)}`;
       console.log('🌐 API URL:', url);
       
-      alert(`AI ile ${emptyWorkItemIds.length} adet release note oluşturuluyor. Bu işlem biraz zaman alabilir, lütfen bekleyin...`);
+      alert(`AI ile ${emptyWorkItemIds.length} adet release note oluşturuluyor (${emptyNotes.length - emptyWorkItemIds.length} adet daha var). Bu işlem biraz zaman alabilir, lütfen bekleyin...`);
       
       // Timeout süresini 5 dakikaya çıkar (AI işlemleri için)
       const controller = new AbortController();
@@ -262,7 +264,7 @@ const ReleaseNotesSection = ({ workItemIds }) => {
   };
 
   return (
-    <Accordion defaultExpanded sx={{ mt: 2 }}>
+    <Accordion sx={{ mt: 2 }}>
       <AccordionSummary expandIcon={<ExpandMoreIcon />}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
           <CheckCircleIcon color="primary" />

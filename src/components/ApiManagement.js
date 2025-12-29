@@ -47,6 +47,7 @@ const ApiManagement = () => {
     repoName: '',
     pipelineName: '',
     serviceImageName: '',
+    releaseName: '',
     currentVersion: '',
     currentVersionCreatedAt: '',
   });
@@ -118,6 +119,7 @@ const ApiManagement = () => {
         repoName: api.repoName || '',
         pipelineName: api.pipelineName || '',
         serviceImageName: api.serviceImageName || '',
+        releaseName: api.releaseName || '',
         currentVersion: api.currentVersion || '',
         currentVersionCreatedAt: api.currentVersionCreatedAt || '',
       });
@@ -130,6 +132,7 @@ const ApiManagement = () => {
         repoName: '',
         pipelineName: '',
         serviceImageName: '',
+        releaseName: '',
         currentVersion: '',
         currentVersionCreatedAt: '',
       });
@@ -147,6 +150,7 @@ const ApiManagement = () => {
       repoName: '',
       pipelineName: '',
       serviceImageName: '',
+      releaseName: '',
       currentVersion: '',
       currentVersionCreatedAt: '',
     });
@@ -181,6 +185,7 @@ const ApiManagement = () => {
             repoName: formData.repoName,
             pipelineName: formData.pipelineName,
             serviceImageName: formData.serviceImageName,
+            releaseName: formData.releaseName,
             currentVersion: formData.currentVersion,
             currentVersionCreatedAt: formData.currentVersionCreatedAt,
           };
@@ -193,6 +198,7 @@ const ApiManagement = () => {
             repoName: formData.repoName,
             pipelineName: formData.pipelineName,
             serviceImageName: formData.serviceImageName,
+            releaseName: formData.releaseName,
             currentVersion: formData.currentVersion,
             currentVersionCreatedAt: formData.currentVersionCreatedAt,
             childApiEndpoints: [],
@@ -233,6 +239,7 @@ const ApiManagement = () => {
             repoName: formData.repoName,
             pipelineName: formData.pipelineName,
             serviceImageName: formData.serviceImageName,
+            releaseName: formData.releaseName,
             currentVersion: formData.currentVersion,
             currentVersionCreatedAt: formData.currentVersionCreatedAt,
           };
@@ -245,6 +252,7 @@ const ApiManagement = () => {
             repoName: formData.repoName,
             pipelineName: formData.pipelineName,
             serviceImageName: formData.serviceImageName,
+            releaseName: formData.releaseName,
             currentVersion: formData.currentVersion,
             currentVersionCreatedAt: formData.currentVersionCreatedAt,
             childApiEndpoints: [],
@@ -413,6 +421,7 @@ const ApiManagement = () => {
                   <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Açıklama</TableCell>
                   <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Repo Name</TableCell>
                   <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Pipeline Name</TableCell>
+                  <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Release Name</TableCell>
                   <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Service Image</TableCell>
                   <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Mevcut Versiyon</TableCell>
                   <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Oluşturulma</TableCell>
@@ -433,6 +442,11 @@ const ApiManagement = () => {
                     <TableCell>
                       {api.pipelineName && (
                         <Chip label={api.pipelineName} size="small" color="info" sx={{ fontFamily: 'monospace' }} />
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {api.releaseName && (
+                        <Chip label={api.releaseName} size="small" color="secondary" sx={{ fontFamily: 'monospace' }} />
                       )}
                     </TableCell>
                     <TableCell>
@@ -512,6 +526,13 @@ const ApiManagement = () => {
               value={formData.pipelineName}
               onChange={(e) => setFormData({ ...formData, pipelineName: e.target.value })}
               helperText="Örn: Cofins.CustomerPortal-CI, Cofins.ServiceApi-Build"
+            />
+            <TextField
+              fullWidth
+              label="Release Name"
+              value={formData.releaseName}
+              onChange={(e) => setFormData({ ...formData, releaseName: e.target.value })}
+              helperText="Release definition adı (Örn: Cofins.CustomerPortal-Release)"
             />
             <TextField
               fullWidth

@@ -565,7 +565,7 @@ const ReleaseHealthCheckV2 = () => {
           <Paper sx={{ p: 3, mb: 3 }}>
             <Grid container spacing={3}>
               <Grid item xs={12} md={3}>
-                <FormControl fullWidth sx={{ minWidth: 250 }}>
+                <FormControl fullWidth>
                   <InputLabel>Ürün Seç</InputLabel>
                   <Select
                     value={selectedProduct}

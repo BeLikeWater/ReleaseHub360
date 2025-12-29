@@ -94,7 +94,7 @@ const WorkItemsSection = ({ selectedProduct, selectedProductData, workItemIds })
   };
 
   return (
-    <Accordion defaultExpanded sx={{ mt: 2 }}>
+    <Accordion sx={{ mt: 2 }}>
       <AccordionSummary expandIcon={<ExpandMoreIcon />}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
           <CheckCircleIcon color="primary" />

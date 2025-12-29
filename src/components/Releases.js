@@ -1,720 +1,510 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Paper,
   Typography,
-  Card,
-  CardContent,
   Chip,
   Avatar,
+  List,
+  ListItem,
+  Button,
+  Collapse,
+  CircularProgress,
+  Divider,
+  Alert,
   IconButton,
   Menu,
   MenuItem,
-  FormControl,
-  InputLabel,
-  Select,
-  FormControlLabel,
-  Checkbox,
-  List,
-  ListItem,
-  Grid,
-  Divider,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
-  Button
+  DialogContentText,
+  ListItemIcon,
+  ListItemText
 } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import {
   RocketLaunch as ReleaseIcon,
+  ArrowBack as ArrowBackIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
+  BugReport as HotfixIcon,
   MoreVert as MoreVertIcon,
-  CalendarToday as DateIcon,
-  Tag as TagIcon,
   CheckCircle as CheckCircleIcon,
-  Cancel as CancelIcon,
-  Schedule as ScheduleIcon,
-  Description as NotesIcon,
-  History as ChangelogIcon,
-  Assignment as TodoIcon,
-  BugReport as BugIcon,
-  ArrowBack as ArrowBackIcon
+  AccessTime as AccessTimeIcon,
+  RadioButtonUnchecked as RadioButtonUncheckedIcon,
+  Description as DescriptionIcon,
+  Assignment as AssignmentIcon,
+  History as HistoryIcon,
+  ReportProblem as ReportProblemIcon
 } from '@mui/icons-material';
+import { collection, getDocs, query, where } from 'firebase/firestore';
+import { db } from '../firebase';
 
 const Releases = () => {
   const navigate = useNavigate();
-  const [selectedVersion, setSelectedVersion] = useState('all');
-  const [groupByVersion, setGroupByVersion] = useState(false);
+  const [releases, setReleases] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedVersions, setExpandedVersions] = useState({});
+  const [environments, setEnvironments] = useState(['Dev', 'Test', 'Prep', 'Prod']);
   const [anchorEl, setAnchorEl] = useState(null);
   const [selectedRelease, setSelectedRelease] = useState(null);
-  const [confirmDialog, setConfirmDialog] = useState(false);
-  const [deploymentInfo, setDeploymentInfo] = useState({ release: null, environment: null });
+  const [approvalDialog, setApprovalDialog] = useState({ open: false, releaseId: null, environment: null });
+  const [approvingEnv, setApprovingEnv] = useState({});
 
-  // Örnek release verileri
-  const releases = [
-    {
-      id: 1,
-      name: 'Release-5',
-      version: 'v1.25.0',
-      tag: 'Release-5',
-      branch: 'release/v1.25.0',
-      createdDate: '2025-10-17T15:13:52',
-      environments: {
-        'Dev': { status: 'pending', date: null },
-        'Test': { status: 'not-started', date: null },
-        'PreProd': { status: 'not-started', date: null },
-        'Prod': { status: 'not-started', date: null }
+  // Firebase'den yayınlanmış versiyonları çek
+  useEffect(() => {
+    const fetchReleases = async () => {
+      try {
+        setLoading(true);
+        
+        // Müşteri bilgisini localStorage'dan al
+        const loginInfo = localStorage.getItem('customerDashboardLogin');
+        if (loginInfo) {
+          const parsed = JSON.parse(loginInfo);
+          
+          // Environment'ları müşteri bilgisinden al
+          if (parsed.customerInfo && parsed.customerInfo.environments && parsed.customerInfo.environments.length > 0) {
+            setEnvironments(parsed.customerInfo.environments);
+          }
+        }
+        
+        const versionsRef = collection(db, 'productVersions');
+        const q = query(versionsRef, where('status', '==', 'Published'));
+        const querySnapshot = await getDocs(q);
+        
+        const versionsData = [];
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          versionsData.push({
+            id: doc.id,
+            ...data
+          });
+        });
+        
+        // Versiyon numarasına göre sırala (büyükten küçüğe)
+        versionsData.sort((a, b) => {
+          const numA = versionToNumber(a.version);
+          const numB = versionToNumber(b.version);
+          return numB - numA;
+        });
+        
+        console.log('📦 Yayınlanmış versiyonlar:', versionsData);
+        setReleases(versionsData);
+      } catch (error) {
+        console.error('Versiyonlar yüklenirken hata:', error);
+      } finally {
+        setLoading(false);
       }
-    },
-    {
-      id: 2,
-      name: 'Release-4',
-      version: 'v1.24.0',
-      tag: 'Release-4',
-      branch: 'release/v1.24.0',
-      createdDate: '2025-10-16T14:25:30',
-      environments: {
-        'Dev': { status: 'pending', date: null },
-        'Test': { status: 'not-started', date: null },
-        'PreProd': { status: 'not-started', date: null },
-        'Prod': { status: 'not-started', date: null }
-      }
-    },
-    {
-      id: 3,
-      name: 'Release-3',
-      version: 'v1.23.0',
-      tag: 'Release-3',
-      branch: 'release/v1.23.0',
-      createdDate: '2025-10-15T11:45:15',
-      environments: {
-        'Dev': { status: 'success', date: '2025-10-15T12:00:00' },
-        'Test': { status: 'success', date: '2025-10-15T12:30:00' },
-        'PreProd': { status: 'success', date: '2025-10-15T13:00:00' },
-        'Prod': { status: 'success', date: '2025-10-15T13:30:00' }
-      }
-    },
-    {
-      id: 4,
-      name: 'Release-2',
-      version: 'v1.22.0',
-      tag: 'Release-2',
-      branch: 'release/v1.22.0',
-      createdDate: '2025-10-14T09:15:45',
-      environments: {
-        'Dev': { status: 'success', date: '2025-10-14T09:30:00' },
-        'Test': { status: 'success', date: '2025-10-14T10:00:00' },
-        'PreProd': { status: 'success', date: '2025-10-14T11:00:00' },
-        'Prod': { status: 'success', date: '2025-10-14T12:00:00' }
-      }
-    },
-    {
-      id: 5,
-      name: 'Release-1',
-      version: 'v1.21.0',
-      tag: 'Release-1',
-      branch: 'release/v1.21.0',
-      createdDate: '2025-10-13T16:30:20',
-      environments: {
-        'Dev': { status: 'success', date: '2025-10-13T16:45:00' },
-        'Test': { status: 'success', date: '2025-10-13T17:15:00' },
-        'PreProd': { status: 'success', date: '2025-10-13T18:00:00' },
-        'Prod': { status: 'success', date: '2025-10-13T19:00:00' }
-      }
-    }
-  ];
-
-  const versions = ['all', 'v1.25.0', 'v1.24.0', 'v1.23.0', 'v1.22.0'];
-  const environments = ['Dev', 'Test', 'PreProd', 'Prod'];
-
-  const filteredReleases = selectedVersion === 'all' 
-    ? releases 
-    : releases.filter(release => release.version === selectedVersion);
-
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'success': return '#4CAF50';
-      case 'failed': return '#f44336';
-      case 'pending': return '#ff9800';
-      case 'not-started': return '#9e9e9e';
-      default: return '#9e9e9e';
-    }
-  };
-
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'success': return <CheckCircleIcon sx={{ color: 'white', fontSize: 16 }} />;
-      case 'failed': return <CancelIcon sx={{ color: 'white', fontSize: 16 }} />;
-      case 'pending': return <ScheduleIcon sx={{ color: 'white', fontSize: 16 }} />;
-      default: return null;
-    }
-  };
-
-  const getStatusText = (status) => {
-    switch (status) {
-      case 'success': return 'Başarılı';
-      case 'failed': return 'Başarısız';
-      case 'pending': return 'Bekliyor';
-      case 'not-started': return 'Başlamadı';
-      default: return 'Bilinmiyor';
-    }
-  };
-
-  const handleMenuClick = (event, release) => {
-    setAnchorEl(event.currentTarget);
-    setSelectedRelease(release);
-  };
-
-  const handleMenuClose = () => {
-    setAnchorEl(null);
-    setSelectedRelease(null);
-  };
-
-  // Mevcut ortam versiyonları (simüle edilmiş)
-  const currentEnvironmentVersions = {
-    'Dev': 'v6.2.1',
-    'Test': 'v6.2.0', 
-    'PreProd': 'v6.1.5',
-    'Prod': 'v6.1.5'
-  };
-
-  // Geçişten önce yapılması gereken işlem sayıları (simüle edilmiş)
-  const pendingTasksCount = {
-    'Dev': 0,
-    'Test': 2,
-    'PreProd': 5,
-    'Prod': 8
-  };
-
-  // Version comparison helper
-  const compareVersions = (version1, version2) => {
-    const v1 = version1.replace('v', '').split('.').map(Number);
-    const v2 = version2.replace('v', '').split('.').map(Number);
+    };
     
-    for (let i = 0; i < Math.max(v1.length, v2.length); i++) {
-      const num1 = v1[i] || 0;
-      const num2 = v2[i] || 0;
-      if (num1 > num2) return 1;
-      if (num1 < num2) return -1;
-    }
-    return 0;
+    fetchReleases();
+  }, []);
+
+  // Versiyon numarasını sayıya çevir (v1.3.0 -> 130)
+  const versionToNumber = (version) => {
+    if (!version) return 0;
+    const clean = version.replace(/^v/, '');
+    const parts = clean.split('.').map(p => parseInt(p) || 0);
+    return parts[0] * 100 + (parts[1] || 0) * 10 + (parts[2] || 0);
   };
 
-  const handleEnvironmentClick = (release, environment) => {
-    const envStatus = release.environments[environment];
-    // Sadece pending veya not-started durumlarında deploy edilebilir
-    if (envStatus.status === 'pending' || envStatus.status === 'not-started') {
-      setDeploymentInfo({ release, environment });
-      setConfirmDialog(true);
-    }
+  const toggleExpand = (versionId) => {
+    setExpandedVersions(prev => ({
+      ...prev,
+      [versionId]: !prev[versionId]
+    }));
   };
 
-  const handleDeployConfirm = () => {
-    // Burada deployment işlemi yapılacak
-    console.log(`Deploying ${deploymentInfo.release.name} to ${deploymentInfo.environment}`);
-    setConfirmDialog(false);
-    setDeploymentInfo({ release: null, environment: null });
+  const handleApprovalClick = (releaseId, environment) => {
+    setApprovalDialog({ open: true, releaseId, environment });
   };
 
-  const handleDeployCancel = () => {
-    setConfirmDialog(false);
-    setDeploymentInfo({ release: null, environment: null });
+  const handleApprovalConfirm = async () => {
+    const { releaseId, environment } = approvalDialog;
+    const envKey = `${releaseId}-${environment}`;
+    
+    // Loading başlat
+    setApprovingEnv(prev => ({ ...prev, [envKey]: true }));
+    setApprovalDialog({ open: false, releaseId: null, environment: null });
+    
+    // 5 saniye bekle (POC için)
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    
+    // Release'i güncelle
+    setReleases(prev => prev.map(release => {
+      if (release.id === releaseId) {
+        return {
+          ...release,
+          [environment.toLowerCase()]: 'Approved'
+        };
+      }
+      return release;
+    }));
+    
+    // Loading'i kapat
+    setApprovingEnv(prev => ({ ...prev, [envKey]: false }));
+  };
+
+  const handleApprovalCancel = () => {
+    setApprovalDialog({ open: false, releaseId: null, environment: null });
   };
 
   const formatDate = (dateString) => {
     if (!dateString) return '-';
-    return new Date(dateString).toLocaleString('tr-TR');
-  };
-
-  const formatCreatedDate = (dateString) => {
-    if (!dateString) return '-';
     return new Date(dateString).toLocaleString('tr-TR', {
       day: '2-digit',
-      month: '2-digit', 
+      month: '2-digit',
       year: 'numeric',
       hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
+      minute: '2-digit'
     });
   };
-
-  const groupedReleases = groupByVersion 
-    ? releases.reduce((acc, release) => {
-        if (!acc[release.version]) acc[release.version] = [];
-        acc[release.version].push(release);
-        return acc;
-      }, {})
-    : { 'Tüm Releases': filteredReleases };
 
   return (
     <Box sx={{ p: 4 }}>
       {/* Header */}
       <Paper elevation={4} sx={{ p: 3, mb: 4, borderRadius: 3 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
             <Button
               startIcon={<ArrowBackIcon />}
-              onClick={() => navigate('/customer-dashboard')}
+              onClick={() => navigate('/customer-dashboard-v2')}
               variant="outlined"
               size="small"
             >
               Geri
             </Button>
+            <Avatar sx={{ bgcolor: 'primary.main', width: 48, height: 48 }}>
+              <ReleaseIcon />
+            </Avatar>
             <Box>
-              <Typography variant="h4" fontWeight="bold" color="primary.main" gutterBottom>
-                Release Yönetimi
+              <Typography variant="h4" fontWeight="bold">
+                Yayınlanmış Versiyonlar
               </Typography>
-              <Typography variant="subtitle1" color="text.secondary">
-                Tüm release'ların durumu ve ortam bilgileri
+              <Typography variant="body2" color="text.secondary">
+                Tüm Published durumundaki versiyonlar
               </Typography>
             </Box>
           </Box>
-          <Avatar sx={{ width: 64, height: 64, bgcolor: 'primary.main' }}>
-            <ReleaseIcon fontSize="large" />
-          </Avatar>
-        </Box>
-
-        {/* Filtreler */}
-        <Box sx={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-          <FormControl size="small" sx={{ minWidth: 200 }}>
-            <InputLabel>Versiyon Seç</InputLabel>
-            <Select
-              value={selectedVersion}
-              label="Versiyon Seç"
-              onChange={(e) => setSelectedVersion(e.target.value)}
-            >
-              <MenuItem value="all">Tüm Versiyonlar</MenuItem>
-              {versions.slice(1).map(version => (
-                <MenuItem key={version} value={version}>{version}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={groupByVersion}
-                onChange={(e) => setGroupByVersion(e.target.checked)}
-                color="primary"
-              />
-            }
-            label="Versiyon Bazında Grupla"
+          <Chip
+            label={`${releases.length} Versiyon`}
+            color="primary"
+            size="medium"
+            sx={{ fontWeight: 'bold', fontSize: '1rem' }}
           />
         </Box>
       </Paper>
 
-      {/* Releases Tablosu */}
+      {/* Releases Listesi */}
       <Paper elevation={4} sx={{ borderRadius: 3, overflow: 'hidden' }}>
-        {/* Tablo Header */}
-        <Box sx={{ 
-          bgcolor: 'grey.100', 
-          p: 2, 
-          display: 'flex', 
-          alignItems: 'center',
-          borderBottom: '1px solid',
-          borderColor: 'divider'
-        }}>
-          <Box sx={{ width: '30%' }}>
-            <Typography variant="h6" fontWeight="bold">
-              Releases
-            </Typography>
+        {loading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', p: 10 }}>
+            <CircularProgress size={60} />
           </Box>
-          <Box sx={{ width: '20%' }}>
-            <Typography variant="h6" fontWeight="bold">
-              Created
-            </Typography>
+        ) : releases.length === 0 ? (
+          <Box sx={{ p: 10, textAlign: 'center' }}>
+            <Alert severity="info">Henüz yayınlanmış versiyon bulunmamaktadır.</Alert>
           </Box>
-          <Box sx={{ width: '50%' }}>
-            <Typography variant="h6" fontWeight="bold">
-              Stages
-            </Typography>
-          </Box>
-        </Box>
+        ) : (
+          <List sx={{ p: 0 }}>
+            {releases.map((release, index) => {
+              const isExpanded = expandedVersions[release.id];
+              const hasReleases = release.releases && release.releases.length > 0;
 
-        {/* Releases Listesi */}
-        <List sx={{ p: 0 }}>
-          {filteredReleases.map((release) => (
-            <ListItem 
-              key={release.id} 
-              sx={{ 
-                p: 0, 
-                borderBottom: '1px solid',
-                borderColor: 'divider',
-                '&:hover': {
-                  backgroundColor: 'action.hover'
-                }
-              }}
-            >
-              <Box sx={{ 
-                width: '100%', 
-                display: 'flex', 
-                alignItems: 'center',
-                p: 2
-              }}>
-                {/* Release Bilgileri */}
-                <Box sx={{ width: '30%', display: 'flex', alignItems: 'center', gap: 2 }}>
-                  <Avatar 
-                    sx={{ 
-                      bgcolor: 'success.main', 
-                      width: 32, 
-                      height: 32,
-                      fontSize: '14px',
-                      fontWeight: 'bold'
+              return (
+                <React.Fragment key={release.id}>
+                  <ListItem
+                    sx={{
+                      p: 2,
+                      borderBottom: index < releases.length - 1 ? '1px solid' : 'none',
+                      borderColor: 'divider',
+                      flexDirection: 'column',
+                      alignItems: 'stretch'
                     }}
                   >
-                    E
-                  </Avatar>
-                  <Box>
-                    <Typography variant="body1" fontWeight="bold" color="primary.main">
-                      {release.name}
-                    </Typography>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <Typography variant="caption" color="text.secondary">
-                        🌿 {release.branch}
-                      </Typography>
-                    </Box>
-                  </Box>
-                </Box>
-
-                {/* Created Tarihi */}
-                <Box sx={{ width: '20%' }}>
-                  <Typography variant="body2">
-                    {formatCreatedDate(release.createdDate)}
-                  </Typography>
-                </Box>
-
-                {/* Stages */}
-                <Box sx={{ width: '50%', display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-                  {environments.map((env) => {
-                    const envStatus = release.environments[env];
-                    const isClickable = envStatus.status === 'pending' || envStatus.status === 'not-started';
-                    
-                    return (
-                      <Chip
-                        key={env}
-                        label={env}
-                        onClick={() => isClickable && handleEnvironmentClick(release, env)}
-                        size="small"
+                    {/* Ana Satır */}
+                    <Box 
+                      sx={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        width: '100%',
+                      }}
+                    >
+                      {/* Icon - Hotfix veya Release */}
+                      <Avatar
                         sx={{
-                          backgroundColor: getStatusColor(envStatus.status),
-                          color: 'white',
-                          fontWeight: 'bold',
-                          cursor: isClickable ? 'pointer' : 'default',
-                          '&:hover': isClickable ? {
-                            opacity: 0.8,
-                            transform: 'scale(1.05)'
-                          } : {},
-                          transition: 'all 0.2s ease-in-out',
-                          minWidth: '80px'
+                          bgcolor: release.isHotfix ? 'error.main' : 'success.main',
+                          width: 36,
+                          height: 36,
+                          mr: 1.5
                         }}
-                        icon={getStatusIcon(envStatus.status)}
-                      />
-                    );
-                  })}
-                </Box>
+                      >
+                        {release.isHotfix ? <HotfixIcon /> : <ReleaseIcon />}
+                      </Avatar>
 
-                {/* Context Menu */}
-                <IconButton
-                  onClick={(e) => handleMenuClick(e, release)}
-                  size="small"
-                  sx={{ ml: 1 }}
-                >
-                  <MoreVertIcon />
-                </IconButton>
-              </Box>
-            </ListItem>
-          ))}
-        </List>
+                      {/* Versiyon Bilgisi */}
+                      <Box sx={{ flex: 1 }}>
+                        <Typography variant="h6" fontWeight="bold" color="primary.main">
+                          {release.version && !release.version.startsWith('v') ? `v${release.version}` : release.version}
+                        </Typography>
+                        {hasReleases && (
+                          <Button
+                            onClick={() => toggleExpand(release.id)}
+                            size="small"
+                            sx={{ 
+                              mt: 0.5,
+                              textTransform: 'none',
+                              p: 0,
+                              minWidth: 'auto',
+                              '&:hover': {
+                                backgroundColor: 'transparent',
+                                textDecoration: 'underline'
+                              }
+                            }}
+                          >
+                            {isExpanded ? 'Servisleri Gizle' : `Servisleri Görüntüle (${release.releases.length})`}
+                          </Button>
+                        )}
+                      </Box>
+
+                      {/* Environment Butonları */}
+                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flex: 1, justifyContent: 'center' }}>
+                        {environments.map((env) => {
+                          // Ortam durumunu productVersions dökümanından al (küçük harf ile)
+                          const envKey = env.toLowerCase();
+                          const envStatus = release[envKey]; // undefined ise bir şey yapma
+                          
+                          // Duruma göre stil ayarları
+                          const getChipProps = () => {
+                            if (!envStatus) {
+                              // Eğer property yoksa normal outlined chip
+                              return {
+                                variant: 'outlined',
+                                sx: {
+                                  borderColor: 'grey.300',
+                                  color: 'grey.600',
+                                  borderWidth: '1px'
+                                },
+                                icon: null
+                              };
+                            }
+                            
+                            switch(envStatus) {
+                              case 'Approved':
+                                return {
+                                  variant: 'outlined',
+                                  sx: {
+                                    borderColor: '#66bb6a',
+                                    color: '#2e7d32',
+                                    borderWidth: '1px',
+                                    backgroundColor: '#e8f5e9',
+                                    '&:hover': {
+                                      borderColor: '#66bb6a',
+                                      backgroundColor: '#e8f5e9'
+                                    }
+                                  },
+                                  icon: <CheckCircleIcon sx={{ fontSize: 16, color: '#66bb6a' }} />
+                                };
+                              case 'PendingApproval':
+                                return {
+                                  variant: 'filled',
+                                  color: 'info',
+                                  sx: {
+                                    backgroundColor: 'info.main',
+                                    color: 'white',
+                                    '&:hover': {
+                                      backgroundColor: 'info.dark'
+                                    }
+                                  },
+                                  icon: <AccessTimeIcon sx={{ fontSize: 16, color: 'white' }} />
+                                };
+                              default:
+                                // Bilinmeyen durumlar için normal outlined
+                                return {
+                                  variant: 'outlined',
+                                  sx: {
+                                    borderColor: 'grey.300',
+                                    color: 'grey.600',
+                                    borderWidth: '1px'
+                                  },
+                                  icon: null
+                                };
+                            }
+                          };
+                          
+                          const chipProps = getChipProps();
+                          const isApproving = approvingEnv[`${release.id}-${env}`];
+                          
+                          return (
+                            <Box key={env} sx={{ position: 'relative', display: 'inline-block' }}>
+                              <Chip
+                                label={env}
+                                size="small"
+                                variant={chipProps.variant}
+                                color={chipProps.color}
+                                icon={isApproving ? <CircularProgress size={16} sx={{ color: 'white' }} /> : chipProps.icon}
+                                onClick={envStatus === 'PendingApproval' && !isApproving ? () => handleApprovalClick(release.id, env) : undefined}
+                                sx={{
+                                  minWidth: '85px',
+                                  fontWeight: '600',
+                                  fontSize: '0.8125rem',
+                                  height: '32px',
+                                  borderRadius: '16px',
+                                  px: 1,
+                                  cursor: envStatus === 'PendingApproval' && !isApproving ? 'pointer' : 'default',
+                                  '& .MuiChip-icon': {
+                                    marginLeft: '8px',
+                                    marginRight: '-4px'
+                                  },
+                                  ...chipProps.sx
+                                }}
+                              />
+                            </Box>
+                          );
+                        })}
+                      </Box>
+
+                      {/* Context Menu */}
+                      <IconButton
+                        size="small"
+                        onClick={(e) => {
+                          setAnchorEl(e.currentTarget);
+                          setSelectedRelease(release);
+                        }}
+                        sx={{ ml: 2 }}
+                      >
+                        <MoreVertIcon />
+                      </IconButton>
+                    </Box>
+
+                    {/* Expandable Releases */}
+                    {hasReleases && (
+                      <Collapse in={isExpanded} timeout="auto" unmountOnExit>
+                        <Box sx={{ mt: 2, pl: 4, pr: 2 }}>
+                          <Divider sx={{ mb: 2 }} />
+                          <Typography variant="caption" color="text.secondary" fontWeight="bold" display="block" sx={{ mb: 1 }}>
+                            Güncelleme Bekleyen Servisler ({release.releases.length})
+                          </Typography>
+                          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                            {release.releases.map((service, idx) => (
+                              <Box
+                                key={idx}
+                                sx={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 2,
+                                  p: 1,
+                                  bgcolor: '#f5f5f5',
+                                  borderRadius: 1
+                                }}
+                              >
+                                <Typography variant="caption" sx={{ flex: 1, fontSize: '0.75rem' }}>
+                                  {service.releaseName}
+                                </Typography>
+                                <Chip
+                                  label={service.version}
+                                  size="small"
+                                  variant="outlined"
+                                  sx={{ fontFamily: 'monospace', fontSize: '0.7rem', height: '20px' }}
+                                />
+                              </Box>
+                            ))}
+                          </Box>
+                        </Box>
+                      </Collapse>
+                    )}
+                  </ListItem>
+                </React.Fragment>
+              );
+            })}
+          </List>
+        )}
       </Paper>
 
       {/* Context Menu */}
       <Menu
         anchorEl={anchorEl}
         open={Boolean(anchorEl)}
-        onClose={handleMenuClose}
-        PaperProps={{
-          elevation: 8,
-          sx: { borderRadius: 2 }
+        onClose={() => {
+          setAnchorEl(null);
+          setSelectedRelease(null);
+        }}
+        anchorOrigin={{
+          vertical: 'bottom',
+          horizontal: 'right',
+        }}
+        transformOrigin={{
+          vertical: 'top',
+          horizontal: 'right',
         }}
       >
-        <MenuItem 
-          onClick={() => {
-            handleMenuClose();
-            navigate('/release-notes');
-          }}
-        >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <NotesIcon fontSize="small" />
-            <Typography variant="body2">Release Notları</Typography>
-          </Box>
+        <MenuItem onClick={() => {
+          // Release Notlar action - navigate to ReleaseNoteForVersion
+          navigate('/release-note-for-version', { state: { release: selectedRelease } });
+          setAnchorEl(null);
+        }}>
+          <ListItemIcon>
+            <DescriptionIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Release Notlar</ListItemText>
         </MenuItem>
-        
-        <MenuItem 
-          onClick={() => {
-            handleMenuClose();
-            navigate('/change-tracking');
-          }}
-        >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <ChangelogIcon fontSize="small" />
-            <Typography variant="body2">Değişiklik Takibi</Typography>
-          </Box>
+        <MenuItem onClick={() => {
+          // Yapılacaklar Listesi action
+          navigate('/todo-list');
+          setAnchorEl(null);
+        }}>
+          <ListItemIcon>
+            <AssignmentIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Yapılacaklar Listesi</ListItemText>
         </MenuItem>
-        
-        <MenuItem 
-          onClick={() => {
-            handleMenuClose();
-            navigate('/todo-list');
-          }}
-        >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <TodoIcon fontSize="small" />
-            <Typography variant="body2">Yapılacaklar Listesi</Typography>
-          </Box>
+        <MenuItem onClick={() => {
+          // Değişiklik Listesi action
+          navigate('/change-tracking');
+          setAnchorEl(null);
+        }}>
+          <ListItemIcon>
+            <HistoryIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Değişiklik Listesi</ListItemText>
         </MenuItem>
-        
+        <Divider />
         <MenuItem 
           onClick={() => {
-            handleMenuClose();
+            // Hata Bildir action
             navigate('/report-issue');
+            setAnchorEl(null);
           }}
+          sx={{ color: 'error.main' }}
         >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <BugIcon fontSize="small" color="error" />
-            <Typography variant="body2" color="error.main">Hata Bildir</Typography>
-          </Box>
+          <ListItemIcon>
+            <ReportProblemIcon fontSize="small" sx={{ color: 'error.main' }} />
+          </ListItemIcon>
+          <ListItemText>Hata Bildir</ListItemText>
         </MenuItem>
       </Menu>
 
-      {/* Deployment Onaylama Diyalogu */}
+      {/* Approval Dialog */}
       <Dialog
-        open={confirmDialog}
-        onClose={handleDeployCancel}
-        maxWidth="md"
+        open={approvalDialog.open}
+        onClose={handleApprovalCancel}
+        maxWidth="sm"
         fullWidth
-        PaperProps={{
-          sx: {
-            borderRadius: 3,
-            p: 1
-          }
-        }}
       >
-        <DialogTitle>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Avatar sx={{ bgcolor: 'primary.main' }}>
-              <ReleaseIcon />
-            </Avatar>
-            <Box>
-              <Typography variant="h6" fontWeight="bold">
-                Deployment Onayı
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Release hazır durumda - Onayınızı bekliyor
-              </Typography>
-            </Box>
-          </Box>
-        </DialogTitle>
-        
-        <DialogContent sx={{ pt: 2 }}>
-          {deploymentInfo.release && (
-            <Box>
-              {/* Ana Bilgilendirme Mesajı */}
-              <Box sx={{ mb: 3, p: 3, bgcolor: 'success.light', borderRadius: 2, border: '1px solid', borderColor: 'success.main' }}>
-                <Typography variant="body1" fontWeight="bold" color="success.contrastText" gutterBottom>
-                  ✅ The state is ready to approve
-                </Typography>
-                <Typography variant="body2" color="success.contrastText">
-                  After release approved, you will get an email to inform that release package is ready to apply.
-                </Typography>
-              </Box>
-
-              {/* Deployment Bilgileri */}
-              <Typography variant="body1" gutterBottom sx={{ mb: 2 }}>
-                <strong>{deploymentInfo.release.name}</strong> release'ini{' '}
-                <Chip 
-                  label={deploymentInfo.environment?.toUpperCase()} 
-                  color="primary" 
-                  size="small" 
-                  sx={{ mx: 1 }}
-                />
-                ortamına deploy etmek istediğinize emin misiniz?
-              </Typography>
-
-              {/* Versiyon Karşılaştırma ve Uyarı */}
-              {(() => {
-                const currentVersion = currentEnvironmentVersions[deploymentInfo.environment];
-                const newVersion = deploymentInfo.release.version;
-                const comparison = compareVersions(newVersion, currentVersion);
-                
-                if (comparison < 0) {
-                  // Düşük versiyon uyarısı
-                  return (
-                    <Box sx={{ mb: 3, p: 3, bgcolor: 'error.light', borderRadius: 2, border: '2px solid', borderColor: 'error.main' }}>
-                      <Typography variant="body1" fontWeight="bold" color="error.contrastText" gutterBottom>
-                        ⚠️ VERSION DOWNGRADE WARNING
-                      </Typography>
-                      <Typography variant="body2" color="error.contrastText" gutterBottom>
-                        You are trying to deploy a lower version ({newVersion}) to an environment that currently has a higher version ({currentVersion}).
-                      </Typography>
-                      <Typography variant="body2" color="error.contrastText" sx={{ fontWeight: 'bold' }}>
-                        This may cause compatibility issues and data loss. Please confirm this is intentional.
-                      </Typography>
-                    </Box>
-                  );
-                } else {
-                  // Normal versiyon geçişi bilgisi
-                  return (
-                    <Box sx={{ mb: 3, p: 2, bgcolor: 'info.light', borderRadius: 2 }}>
-                      <Typography variant="body2" color="info.contrastText" gutterBottom>
-                        <strong>Version Transition:</strong>
-                      </Typography>
-                      <Typography variant="body2" color="info.contrastText">
-                        {deploymentInfo.environment} ortamı <strong>{currentVersion}</strong> versiyonundan <strong>{newVersion}</strong> versiyonuna geçecektir.
-                      </Typography>
-                      {comparison > 0 && (
-                        <Typography variant="body2" color="info.contrastText" sx={{ mt: 1, fontWeight: 'bold' }}>
-                          ✅ Bu bir versiyon yükseltmesidir.
-                        </Typography>
-                      )}
-                      {comparison === 0 && (
-                        <Typography variant="body2" color="info.contrastText" sx={{ mt: 1, fontWeight: 'bold' }}>
-                          ℹ️ Aynı versiyon tekrar deploy edilecektir.
-                        </Typography>
-                      )}
-                    </Box>
-                  );
-                }
-              })()}
-
-              {/* Release Detay Bilgileri */}
-              <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.100', borderRadius: 2 }}>
-                <Typography variant="subtitle2" color="text.primary" gutterBottom>
-                  Release Detayları:
-                </Typography>
-                <Grid container spacing={2}>
-                  <Grid item xs={6}>
-                    <Typography variant="body2" color="text.secondary">
-                      • <strong>Versiyon:</strong> {deploymentInfo.release.version}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      • <strong>Tag:</strong> {deploymentInfo.release.tag}
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={6}>
-                    <Typography variant="body2" color="text.secondary">
-                      • <strong>Branch:</strong> {deploymentInfo.release.branch}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      • <strong>Oluşturulma:</strong> {formatDate(deploymentInfo.release.createdDate)}
-                    </Typography>
-                  </Grid>
-                </Grid>
-              </Box>
-
-              {/* Geçişten Önce Yapılması Gereken İşlemler */}
-              {(() => {
-                const taskCount = pendingTasksCount[deploymentInfo.environment];
-                
-                if (taskCount > 0) {
-                  return (
-                    <Box sx={{ mt: 3, p: 3, bgcolor: 'warning.light', borderRadius: 2, border: '2px solid', borderColor: 'warning.main' }}>
-                      <Typography variant="body1" fontWeight="bold" color="warning.contrastText" gutterBottom>
-                        ⚠️ Deployment Öncesi Gerekli İşlemler
-                      </Typography>
-                      <Typography variant="body2" color="warning.contrastText" gutterBottom>
-                        {deploymentInfo.environment} ortamına deployment yapılmadan önce <strong>{taskCount} adet</strong> işlem tamamlanmalıdır.
-                      </Typography>
-                      <Typography variant="body2" color="warning.contrastText" sx={{ fontStyle: 'italic' }}>
-                        Bu işlemleri tamamlamadan deployment yapılamaz.
-                      </Typography>
-                    </Box>
-                  );
-                } else {
-                  return (
-                    <Box sx={{ mt: 3, p: 2, bgcolor: 'success.light', borderRadius: 2, border: '1px solid', borderColor: 'success.main' }}>
-                      <Typography variant="body2" fontWeight="bold" color="success.contrastText" gutterBottom>
-                        ✅ Tüm Ön Koşullar Tamamlandı
-                      </Typography>
-                      <Typography variant="body2" color="success.contrastText">
-                        Deployment için gerekli tüm işlemler tamamlanmıştır.
-                      </Typography>
-                    </Box>
-                  );
-                }
-              })()}
-
-              {/* Son Durum Bilgisi */}
-              <Box sx={{ mt: 3, p: 2, bgcolor: 'primary.light', borderRadius: 2 }}>
-                <Typography variant="body2" color="primary.contrastText" gutterBottom>
-                  <strong>Deployment sonrası durum:</strong>
-                </Typography>
-                <Typography variant="body2" color="primary.contrastText">
-                  {deploymentInfo.environment} ortamı {deploymentInfo.release.version} versiyonuna sahip olacak ve email bildirimi gönderilecektir.
-                </Typography>
-              </Box>
-            </Box>
-          )}
+        <DialogTitle>Ortam Onayı</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            <strong>{approvalDialog.environment}</strong> ortamı için bu versiyonu onaylamak istediğinizden emin misiniz?
+          </DialogContentText>
         </DialogContent>
-
-        <DialogActions sx={{ p: 3, gap: 2 }}>
-          <Button
-            onClick={handleDeployCancel}
-            variant="outlined"
-            color="inherit"
-            sx={{ borderRadius: 2, px: 3 }}
-          >
-            İptal Et
+        <DialogActions>
+          <Button onClick={handleApprovalCancel} color="inherit">
+            İptal
           </Button>
-          
-          {/* ToDo Liste Butonu - Sadece bekleyen işlem varsa göster */}
-          {deploymentInfo.release && pendingTasksCount[deploymentInfo.environment] > 0 && (
-            <Button
-              onClick={() => {
-                setConfirmDialog(false);
-                navigate('/todo-list');
-              }}
-              variant="contained"
-              color="warning"
-              sx={{ borderRadius: 2, px: 3 }}
-            >
-              ToDo Liste ({pendingTasksCount[deploymentInfo.environment]})
-            </Button>
-          )}
-          
-          <Button
-            onClick={handleDeployConfirm}
-            variant="contained"
-            disabled={deploymentInfo.release && pendingTasksCount[deploymentInfo.environment] > 0}
-            color={(() => {
-              if (deploymentInfo.release) {
-                const taskCount = pendingTasksCount[deploymentInfo.environment];
-                if (taskCount > 0) return 'inherit'; // Disabled durumu için
-                
-                const currentVersion = currentEnvironmentVersions[deploymentInfo.environment];
-                const newVersion = deploymentInfo.release.version;
-                const comparison = compareVersions(newVersion, currentVersion);
-                return comparison < 0 ? 'error' : 'primary';
-              }
-              return 'primary';
-            })()}
-            sx={{ 
-              borderRadius: 2, 
-              px: 3,
-              opacity: deploymentInfo.release && pendingTasksCount[deploymentInfo.environment] > 0 ? 0.5 : 1
-            }}
-          >
-            {(() => {
-              if (deploymentInfo.release) {
-                const taskCount = pendingTasksCount[deploymentInfo.environment];
-                if (taskCount > 0) return `${taskCount} İşlem Bekliyor`;
-                
-                const currentVersion = currentEnvironmentVersions[deploymentInfo.environment];
-                const newVersion = deploymentInfo.release.version;
-                const comparison = compareVersions(newVersion, currentVersion);
-                return comparison < 0 ? 'Downgrade Onayla' : 'Deploy Et';
-              }
-              return 'Deploy Et';
-            })()}
+          <Button onClick={handleApprovalConfirm} variant="contained" color="primary" autoFocus>
+            Onayla
           </Button>
         </DialogActions>
       </Dialog>

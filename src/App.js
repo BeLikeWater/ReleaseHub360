@@ -7,6 +7,7 @@ import ProcessFlow from './components/ProcessFlow';
 import CustomerDashboard from './components/CustomerDashboard';
 import CustomerDashboardV2 from './components/CustomerDashboardV2';
 import Releases from './components/Releases';
+import Releases_old from './components/Releases_old';
 import TodoList from './components/TodoList';
 import ChangeTracking from './components/ChangeTracking';
 import ReportIssue from './components/ReportIssue';
@@ -36,6 +37,7 @@ import ProductCatalog from './components/ProductCatalog';
 import ModuleGroupManagement from './components/ModuleGroupManagement';
 import ModuleManagement from './components/ModuleManagement';
 import ApiManagement from './components/ApiManagement';
+import ReleaseNoteForVersion from './components/ReleaseNoteForVersion';
 
 const theme = createTheme({
   palette: {
@@ -83,6 +85,7 @@ function App() {
             <Route path="/customer-dashboard" element={<CustomerDashboard />} />
             <Route path="/customer-dashboard-v2" element={<CustomerDashboardV2 />} />
             <Route path="/releases" element={<Releases />} />
+            <Route path="/releases_old" element={<Releases_old />} />
             <Route path="/todo-list" element={<TodoList />} />
             <Route path="/change-tracking" element={<ChangeTracking />} />
             <Route path="/report-issue" element={<ReportIssue />} />
@@ -112,6 +115,7 @@ function App() {
         <Route path="/module-group-management" element={<ModuleGroupManagement />} />
         <Route path="/module-management" element={<ModuleManagement />} />
         <Route path="/api-management" element={<ApiManagement />} />
+        <Route path="/release-note-for-version" element={<ReleaseNoteForVersion />} />
           </Routes>
         </Layout>
       </Router>
