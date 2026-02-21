@@ -40,7 +40,6 @@ import ModuleGroupManagement from './components/ModuleGroupManagement';
 import ModuleManagement from './components/ModuleManagement';
 import ApiManagement from './components/ApiManagement';
 import ReleaseNoteForVersion from './components/ReleaseNoteForVersion';
-import DLPFindings from './components/DLPFindings';
 import CodeSyncManagement from './components/CodeSyncManagement';
 
 const theme = createTheme({
@@ -122,7 +121,6 @@ function App() {
         <Route path="/module-management" element={<ModuleManagement />} />
         <Route path="/api-management" element={<ApiManagement />} />
         <Route path="/release-note-for-version" element={<ReleaseNoteForVersion />} />
-        <Route path="/dlp-findings" element={<DLPFindings />} />
         <Route path="/code-sync-management" element={<CodeSyncManagement />} />
           </Routes>
         </Layout>
