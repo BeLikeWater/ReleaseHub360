@@ -552,7 +552,7 @@ const ReleaseHealthCheckV2 = () => {
   return (
     <Box>
       <Typography variant="h4" gutterBottom sx={{ fontWeight: 'bold', mb: 3 }}>
-        Release Health Check v2
+        Release Health Check v2-4
       </Typography>
 
       {loading ? (

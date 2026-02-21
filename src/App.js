@@ -25,7 +25,9 @@ import HotfixRequest from './components/HotfixRequest';
 import HotfixRequestApproval from './components/HotfixRequestApproval';
 import VersionLifecycle from './components/VersionLifecycle';
 import ServiceVersionMatrix from './components/ServiceVersionMatrix';
+import ServiceVersionMatrixV2 from './components/ServiceVersionMatrixV2';
 import CustomerReleaseTrack from './components/CustomerReleaseTrack';
+import CustomerReleaseTrackV2 from './components/CustomerReleaseTrackV2';
 import CustomerServiceMapping from './components/CustomerServiceMapping';
 import CustomerManagement from './components/CustomerManagement';
 import CustomerManagementV2 from './components/CustomerManagementV2';
@@ -38,6 +40,8 @@ import ModuleGroupManagement from './components/ModuleGroupManagement';
 import ModuleManagement from './components/ModuleManagement';
 import ApiManagement from './components/ApiManagement';
 import ReleaseNoteForVersion from './components/ReleaseNoteForVersion';
+import DLPFindings from './components/DLPFindings';
+import CodeSyncManagement from './components/CodeSyncManagement';
 
 const theme = createTheme({
   palette: {
@@ -103,7 +107,9 @@ function App() {
             <Route path="/hotfix-request-approval" element={<HotfixRequestApproval />} />
             <Route path="/version-lifecycle" element={<VersionLifecycle />} />
         <Route path="/service-version-matrix" element={<ServiceVersionMatrix />} />
+        <Route path="/service-version-matrix-v2" element={<ServiceVersionMatrixV2 />} />
         <Route path="/customer-release-track" element={<CustomerReleaseTrack />} />
+        <Route path="/customer-release-track-v2" element={<CustomerReleaseTrackV2 />} />
         <Route path="/customer-service-mapping" element={<CustomerServiceMapping />} />
         <Route path="/customer-management" element={<CustomerManagement />} />
         <Route path="/product-management" element={<ProductManagement />} />
@@ -116,6 +122,8 @@ function App() {
         <Route path="/module-management" element={<ModuleManagement />} />
         <Route path="/api-management" element={<ApiManagement />} />
         <Route path="/release-note-for-version" element={<ReleaseNoteForVersion />} />
+        <Route path="/dlp-findings" element={<DLPFindings />} />
+        <Route path="/code-sync-management" element={<CodeSyncManagement />} />
           </Routes>
         </Layout>
       </Router>

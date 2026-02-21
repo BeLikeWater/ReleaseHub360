@@ -98,7 +98,7 @@ const ReleaseNotesSection = ({ workItemIds }) => {
       }
       
       // Sadece ilk 2 tanesini al
-      const notesToProcess = emptyNotes.slice(0, 2);
+      const notesToProcess = emptyNotes.slice(0, 5);
       const emptyWorkItemIds = notesToProcess.map(note => note.workitemId);
       console.log(`📋 İlk ${emptyWorkItemIds.length} boş work item işlenecek (toplam ${emptyNotes.length} boş kayıt var):`, emptyWorkItemIds);
       

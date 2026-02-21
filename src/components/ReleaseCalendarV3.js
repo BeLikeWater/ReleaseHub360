@@ -56,7 +56,6 @@ const ReleaseCalendarV3 = () => {
     testDate: '',
     preProdDate: '',
     releaseDate: '',
-    order: '',
     isDeprecated: false
   });
 
@@ -194,6 +193,14 @@ const ReleaseCalendarV3 = () => {
     return date.toLocaleDateString('tr-TR', { year: 'numeric', month: 'short', day: 'numeric' });
   };
 
+  // Version'ı numeric değere çevir (v1.2.3 -> 10203)
+  const versionToNumber = (version) => {
+    if (!version) return 0;
+    const versionStr = version.replace(/^v/, '');
+    const parts = versionStr.split('.').map(num => parseInt(num, 10) || 0);
+    return parts[0] * 10000 + (parts[1] || 0) * 100 + (parts[2] || 0);
+  };
+
   // Dialog açma/kapama
   const handleOpenDialog = (release = null) => {
     if (release) {
@@ -205,7 +212,6 @@ const ReleaseCalendarV3 = () => {
         testDate: release.testDate,
         preProdDate: release.preProdDate,
         releaseDate: release.releaseDate,
-        order: release.order,
         isDeprecated: release.isDeprecated
       });
     } else {
@@ -217,7 +223,6 @@ const ReleaseCalendarV3 = () => {
         testDate: '',
         preProdDate: '',
         releaseDate: '',
-        order: releases.length + 1,
         isDeprecated: false
       });
     }
@@ -299,8 +304,8 @@ const ReleaseCalendarV3 = () => {
     }
   };
 
-  // Tarihe göre sıralama
-  const sortedReleases = [...releases].sort((a, b) => b.order - a.order);
+  // Versiyona göre sıralama (büyükten küçüğe)
+  const sortedReleases = [...releases].sort((a, b) => versionToNumber(b.version) - versionToNumber(a.version));
 
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
@@ -388,7 +393,6 @@ const ReleaseCalendarV3 = () => {
         <Table>
           <TableHead>
             <TableRow sx={{ bgcolor: 'primary.light' }}>
-              <TableCell><strong>Sıra</strong></TableCell>
               <TableCell><strong>Versiyon</strong></TableCell>
               <TableCell><strong>Durum</strong></TableCell>
               <TableCell><strong>Master Başlangıç</strong></TableCell>
@@ -410,9 +414,6 @@ const ReleaseCalendarV3 = () => {
                     opacity: release.isDeprecated ? 0.6 : 1
                   }}
                 >
-                  <TableCell>
-                    <Chip label={release.order} size="small" variant="outlined" />
-                  </TableCell>
                   <TableCell>
                     <Typography variant="subtitle2" fontWeight="bold">
                       {release.version}
@@ -538,15 +539,6 @@ const ReleaseCalendarV3 = () => {
                 value={formData.releaseDate}
                 onChange={(e) => handleFormChange('releaseDate', e.target.value)}
                 InputLabelProps={{ shrink: true }}
-              />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="Sıra"
-                type="number"
-                value={formData.order}
-                onChange={(e) => handleFormChange('order', parseInt(e.target.value))}
               />
             </Grid>
             <Grid item xs={12}>

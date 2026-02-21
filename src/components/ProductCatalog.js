@@ -27,6 +27,10 @@ import {
   List,
   ListItem,
   ListItemText,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -53,6 +57,7 @@ const ProductCatalog = () => {
     serviceImageName: '',
     currentVersion: '',
     currentVersionCreatedAt: '',
+    deploymentType: 'docker', // 'docker', 'dll-ftp', 'code-sync'
   });
   const [uploadStatus, setUploadStatus] = useState('');
 
@@ -86,6 +91,7 @@ const ProductCatalog = () => {
         serviceImageName: product.serviceImageName || '',
         currentVersion: product.currentVersion || '',
         currentVersionCreatedAt: product.currentVersionCreatedAt || '',
+        deploymentType: product.deploymentType || 'docker',
       });
     } else {
       setEditingProduct(null);
@@ -95,6 +101,7 @@ const ProductCatalog = () => {
         serviceImageName: '',
         currentVersion: '',
         currentVersionCreatedAt: '',
+        deploymentType: 'docker',
       });
     }
     setOpenDialog(true);
@@ -290,6 +297,7 @@ const ProductCatalog = () => {
               <TableRow sx={{ bgcolor: '#1976d2' }}>
                 <TableCell sx={{ color: 'white', fontWeight: 'bold', width: 50 }}></TableCell>
                 <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Ürün</TableCell>
+                <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Dağıtım Yöntemi</TableCell>
                 <TableCell sx={{ color: 'white', fontWeight: 'bold' }}>Versiyon</TableCell>
                 <TableCell sx={{ color: 'white', fontWeight: 'bold', textAlign: 'center' }}>Modül Grupları</TableCell>
                 <TableCell sx={{ color: 'white', fontWeight: 'bold', textAlign: 'center' }}>Toplam Modül</TableCell>
@@ -324,6 +332,35 @@ const ProductCatalog = () => {
                               sx={{ fontFamily: 'monospace', fontSize: '0.7rem' }}
                             />
                           </Box>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {product.deploymentType === 'docker' && (
+                          <Chip 
+                            label="Docker Image"
+                            size="small" 
+                            color="primary"
+                            variant="outlined"
+                          />
+                        )}
+                        {product.deploymentType === 'dll-ftp' && (
+                          <Chip 
+                            label="DLL/FTP"
+                            size="small" 
+                            color="warning"
+                            variant="outlined"
+                          />
+                        )}
+                        {product.deploymentType === 'code-sync' && (
+                          <Chip 
+                            label="Code Sync"
+                            size="small" 
+                            color="info"
+                            variant="outlined"
+                          />
+                        )}
+                        {!product.deploymentType && (
+                          <Typography variant="body2" color="text.secondary">-</Typography>
                         )}
                       </TableCell>
                       <TableCell>
@@ -536,6 +573,41 @@ const ProductCatalog = () => {
               multiline
               rows={3}
             />
+            
+            <FormControl fullWidth>
+              <InputLabel>Derleme ve Yayınlama Yöntemi</InputLabel>
+              <Select
+                value={formData.deploymentType}
+                label="Derleme ve Yayınlama Yöntemi"
+                onChange={(e) => setFormData({ ...formData, deploymentType: e.target.value })}
+              >
+                <MenuItem value="docker">
+                  <Box>
+                    <Typography variant="body1">Docker Image - Container Registry</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Docker image oluşturulup registry'ye push'lanarak yayınlanır
+                    </Typography>
+                  </Box>
+                </MenuItem>
+                <MenuItem value="dll-ftp">
+                  <Box>
+                    <Typography variant="body1">DLL/Binary - FTP Deployment</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      DLL/Binary dosyalar derlenir ve FTP üzerinden sunuculara yüklenir
+                    </Typography>
+                  </Box>
+                </MenuItem>
+                <MenuItem value="code-sync">
+                  <Box>
+                    <Typography variant="body1">Code Synchronization - Sold Codebase</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Kodu satılmış müşterilere Git üzerinden kod senkronizasyonu ile güncellenir
+                    </Typography>
+                  </Box>
+                </MenuItem>
+              </Select>
+            </FormControl>
+            
             <TextField
               fullWidth
               label="Service Image Adı"

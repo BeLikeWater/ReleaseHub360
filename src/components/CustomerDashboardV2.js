@@ -34,7 +34,7 @@ import { collection, query, where, getDocs, orderBy, doc, getDoc } from 'firebas
 import {
   RocketLaunch as ReleaseIcon,
   BugReport as HotfixIcon,
-  Warning as UrgentIcon,
+  Extension as DependencyIcon,
   TrendingUp as TrendIcon,
   Assessment as ReportIcon,
   Refresh as RefreshIcon,
@@ -75,7 +75,6 @@ const customerVersion = 4;
 const currentRelease = 6;
 const pendingReleases = currentRelease - customerVersion;
 const pendingHotfixes = 5;
-const criticalHotfixes = 2;
 const pendingUrgents = 7;
 const expiredUrgents = 3;
 
@@ -339,6 +338,7 @@ const CustomerDashboardV2 = () => {
             testDate: data.testDate || '',
             releaseDate: data.releaseDate || data.publishDate || '',
             sira: data.sira || data.order || 0,
+            isHotfix: data.isHotfix || false,
             environments: {
               dev: { 
                 planned: data.devPlannedDate || '', 
@@ -883,8 +883,8 @@ const CustomerDashboardV2 = () => {
       </Paper>
 
       <Grid container spacing={4}>
-        {/* Bekleyen Release Kartı */}
-        <Grid item >
+        {/* Bekleyen Güncellemeler Kartı */}
+        <Grid item xs={12} md={6}>
           <Card 
             elevation={12}
             sx={{ 
@@ -922,12 +922,44 @@ const CustomerDashboardV2 = () => {
                     </Typography>
                   </Box>
                 </Box>
-                <Chip 
-                  label={`${pendingReleases}`}
-                  color={getStatusColor(pendingReleases)}
-                  size="small"
-                  sx={{ fontWeight: 'bold' }}
-                />
+                <Box sx={{ display: 'flex', gap: 1, flexDirection: 'column' }}>
+                  {(() => {
+                    const currentVersionRaw = customerProducts.length > 0 ? customerProducts[0].version : null;
+                    const currentVersionNumber = versionToNumber(currentVersionRaw);
+                    
+                    const newerVersions = versions.filter(v => {
+                      const isPublished = v.status === 'Published';
+                      const versionNumber = versionToNumber(v.version);
+                      return isPublished && versionNumber > currentVersionNumber;
+                    });
+                    
+                    const hotfixCount = newerVersions.filter(v => v.isHotfix === true).length;
+                    const normalCount = newerVersions.filter(v => !v.isHotfix).length;
+                    const totalCount = newerVersions.length;
+                    
+                    return (
+                      <>
+                        {totalCount > 0 && (
+                          <Chip 
+                            label={`${totalCount}`}
+                            color="warning"
+                            size="small"
+                            sx={{ fontWeight: 'bold' }}
+                          />
+                        )}
+                        {hotfixCount > 0 && (
+                          <Chip 
+                            icon={<HotfixIcon fontSize="small" />}
+                            label={`${hotfixCount} Hotfix`}
+                            color="error"
+                            size="small"
+                            sx={{ fontWeight: 'bold' }}
+                          />
+                        )}
+                      </>
+                    );
+                  })()}
+                </Box>
               </Box>
               
               {/* Mevcut Versiyon */}
@@ -959,64 +991,20 @@ const CustomerDashboardV2 = () => {
                   // Mevcut versiyonu al (v harfini kaldır)
                   const currentVersionRaw = customerProducts.length > 0 ? customerProducts[0].version : null;
                   const currentVersion = currentVersionRaw ? currentVersionRaw.replace(/^v/, '') : null;
+                  const currentVersionNumber = versionToNumber(currentVersion);
                   
-                  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-                  console.log('🔍 BEKLEYEN GÜNCELLEME KONTROLÜ');
-                  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-                  console.log('📌 Müşterinin mevcut versiyonu:', currentVersion);
-                  console.log('📊 Toplam versiyon sayısı:', versions.length);
-                  console.log('');
-                  
-                  // Tüm versiyonları göster
-                  console.log('📋 TÜM VERSİYONLAR:');
-                  versions.forEach((v, index) => {
-                    console.log(`  ${index + 1}. Versiyon: ${v.version}, Status: "${v.status}", Sıra: ${v.sira || 'yok'}`);
+                  // Yayınlanmış ve mevcut versiyondan daha yeni olan versiyonları filtrele
+                  const newerVersions = versions.filter(v => {
+                    const isPublished = v.status === 'Published';
+                    const versionNumber = versionToNumber(v.version);
+                    return isPublished && versionNumber > currentVersionNumber;
                   });
-                  console.log('');
                   
-                  // Yayınlandı statusündeki versiyonları bul ve sıraya göre sırala
-                  const publishedVersions = versions
-                    .filter(v => {
-                      const isPublished = v.status === 'Published';
-                      console.log(`  Filtre: ${v.version} - Status: "${v.status}" - Eşleşiyor mu? ${isPublished}`);
-                      return isPublished;
-                    });
+                  // Hotfix ve normal versiyonları ayır
+                  const hotfixUpdates = newerVersions.filter(v => v.isHotfix === true);
+                  const normalUpdates = newerVersions.filter(v => !v.isHotfix);
                   
-                  console.log('');
-                  console.log('✅ FİLTRELENMİŞ (Published) VERSİYONLAR:', publishedVersions.length, 'adet');
-                  publishedVersions.forEach((v, index) => {
-                    console.log(`  ${index + 1}. ${v.version} - Sıra: ${v.sira || 'yok'}`);
-                  });
-                  console.log('');
-                  
-                  // Sırala (versiyon numarasına göre büyükten küçüğe)
-                  publishedVersions.sort((a, b) => versionToNumber(b.version) - versionToNumber(a.version));
-                  
-                  console.log('📊 SIRALANMIŞ (Büyükten küçüğe) VERSİYONLAR:');
-                  publishedVersions.forEach((v, index) => {
-                    console.log(`  ${index + 1}. ${v.version} - Sıra: ${v.sira || 0}`);
-                  });
-                  console.log('');
-                  
-                  // En yüksek sıralı yayınlanmış versiyonu bul
-                  const latestPublished = publishedVersions.length > 0 ? publishedVersions[0] : null;
-                  
-                  console.log('🎯 EN SON YAYINLANAN VERSİYON:', latestPublished ? latestPublished.version : 'YOK');
-                  console.log('');
-                  
-                  // Karşılaştırma (her iki versiyondan da v harfini kaldır)
-                  const latestVersion = latestPublished ? latestPublished.version.replace(/^v/, '') : null;
-                  const hasUpdate = latestVersion && latestVersion !== currentVersion;
-                  
-                  console.log('🔄 KARŞILAŞTIRMA:');
-                  console.log('   Mevcut versiyon:', currentVersion);
-                  console.log('   Son yayınlanan:', latestVersion);
-                  console.log('   Eşit mi?', latestVersion ? (latestVersion === currentVersion) : 'Karşılaştırılamıyor');
-                  console.log('   Güncelleme var mı?', hasUpdate);
-                  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-                  console.log('');
-                  
-                  if (!hasUpdate) {
+                  if (newerVersions.length === 0) {
                     return (
                       <Alert severity="success" sx={{ borderRadius: 2 }}>
                         ✅ Bekleyen güncelleme bulunmamaktadır
@@ -1027,29 +1015,63 @@ const CustomerDashboardV2 = () => {
                   return (
                     <Box>
                       <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block', fontWeight: 600 }}>
-                        🔔 Sonraki Güncelleme
+                        🔔 Bekleyen Güncellemeler
                       </Typography>
-                      <Paper 
-                        elevation={2}
-                        sx={{ 
-                          p: 2, 
-                          bgcolor: '#fff3e0', 
-                          borderRadius: 2,
-                          textAlign: 'center',
-                          border: '2px solid #ff9800',
-                          transition: 'transform 0.2s',
-                          '&:hover': {
-                            transform: 'scale(1.05)'
-                          }
-                        }}
-                      >
-                        <Typography variant="h6" fontWeight="bold" color="warning.dark">
-                          {latestPublished.version && !latestPublished.version.startsWith('v') ? `v${latestPublished.version}` : latestPublished.version}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          Sonraki Versiyon
-                        </Typography>
-                      </Paper>
+                      <Grid container spacing={1.5}>
+                        {normalUpdates.length > 0 && (
+                          <Grid item xs={hotfixUpdates.length > 0 ? 6 : 12}>
+                            <Paper 
+                              elevation={2}
+                              sx={{ 
+                                p: 2, 
+                                bgcolor: '#e3f2fd', 
+                                borderRadius: 2,
+                                textAlign: 'center',
+                                border: '2px solid #1976d2',
+                                transition: 'transform 0.2s',
+                                '&:hover': {
+                                  transform: 'scale(1.05)'
+                                }
+                              }}
+                            >
+                              <Typography variant="h6" fontWeight="bold" color="primary.main">
+                                {normalUpdates.length}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                Normal Güncelleme
+                              </Typography>
+                            </Paper>
+                          </Grid>
+                        )}
+                        {hotfixUpdates.length > 0 && (
+                          <Grid item xs={normalUpdates.length > 0 ? 6 : 12}>
+                            <Paper 
+                              elevation={2}
+                              sx={{ 
+                                p: 2, 
+                                bgcolor: '#ffebee', 
+                                borderRadius: 2,
+                                textAlign: 'center',
+                                border: '2px solid #d32f2f',
+                                transition: 'transform 0.2s',
+                                '&:hover': {
+                                  transform: 'scale(1.05)'
+                                }
+                              }}
+                            >
+                              <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
+                                <HotfixIcon fontSize="small" color="error" />
+                                <Typography variant="h6" fontWeight="bold" color="error.main">
+                                  {hotfixUpdates.length}
+                                </Typography>
+                              </Box>
+                              <Typography variant="caption" color="text.secondary">
+                                Hotfix Güncelleme
+                              </Typography>
+                            </Paper>
+                          </Grid>
+                        )}
+                      </Grid>
                     </Box>
                   );
                 })()}
@@ -1058,136 +1080,8 @@ const CustomerDashboardV2 = () => {
           </Card>
         </Grid>
 
-        {/* Bekleyen Hotfix Kartı */}
+        {/* Bekleyen Bağımlılık Güncellemeleri Kartı */}
         <Grid item xs={12} md={6}>
-          <Card 
-            elevation={12}
-            onClick={() => navigate('/hotfix-management')}
-            sx={{ 
-              height: '100%',
-              background: 'linear-gradient(145deg, #ffffff, #f0f0f0)',
-              borderRadius: 4,
-              transition: 'transform 0.3s ease-in-out',
-              cursor: 'pointer',
-              '&:hover': {
-                transform: 'translateY(-8px)',
-                boxShadow: '0 20px 40px rgba(0,0,0,0.1)'
-              }
-            }}
-          >
-            <CardContent sx={{ p: 3 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                  <Avatar 
-                    sx={{ 
-                      width: 48, 
-                      height: 48, 
-                      bgcolor: 'error.main',
-                      boxShadow: '0 8px 16px rgba(211, 47, 47, 0.3)'
-                    }}
-                  >
-                    <HotfixIcon />
-                  </Avatar>
-                  <Box>
-                    <Typography variant="h6" fontWeight="bold">
-                      Bekleyen Hotfix
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Kritik düzeltmeler
-                    </Typography>
-                  </Box>
-                </Box>
-                <Chip 
-                  label={`${pendingHotfixes}`}
-                  color={getStatusColor(pendingHotfixes)}
-                  size="small"
-                  sx={{ fontWeight: 'bold' }}
-                />
-              </Box>
-              
-              {/* Toplam Hotfix Sayısı */}
-              <Box sx={{ mb: 2 }}>
-                <Paper 
-                  elevation={3}
-                  sx={{ 
-                    p: 2, 
-                    bgcolor: 'error.main', 
-                    color: 'white', 
-                    borderRadius: 2,
-                    textAlign: 'center',
-                    background: 'linear-gradient(135deg, #d32f2f 0%, #c62828 100%)',
-                    boxShadow: '0 4px 12px rgba(211, 47, 47, 0.3)'
-                  }}
-                >
-                  <Typography variant="caption" sx={{ opacity: 0.9, display: 'block', mb: 0.5 }}>
-                    � Toplam Hotfix
-                  </Typography>
-                  <Typography variant="h5" fontWeight="bold">
-                    {pendingHotfixes} Adet
-                  </Typography>
-                </Paper>
-              </Box>
-
-              {/* Hotfix Detayı */}
-              <Box>
-                <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block', fontWeight: 600 }}>
-                  📊 Hotfix Detayı
-                </Typography>
-                <Grid container spacing={1.5}>
-                  <Grid item xs={6}>
-                    <Paper 
-                      elevation={2}
-                      sx={{ 
-                        p: 1.5, 
-                        bgcolor: '#ffebee', 
-                        borderRadius: 2,
-                        textAlign: 'center',
-                        border: '2px solid #f44336',
-                        transition: 'transform 0.2s',
-                        '&:hover': {
-                          transform: 'scale(1.05)'
-                        }
-                      }}
-                    >
-                      <Typography variant="h6" fontWeight="bold" color="error.dark">
-                        {criticalHotfixes}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        Kritik
-                      </Typography>
-                    </Paper>
-                  </Grid>
-                  <Grid item xs={6}>
-                    <Paper 
-                      elevation={2}
-                      sx={{ 
-                        p: 1.5, 
-                        bgcolor: '#fff3e0', 
-                        borderRadius: 2,
-                        textAlign: 'center',
-                        border: '2px solid #ff9800',
-                        transition: 'transform 0.2s',
-                        '&:hover': {
-                          transform: 'scale(1.05)'
-                        }
-                      }}
-                    >
-                      <Typography variant="h6" fontWeight="bold" color="warning.dark">
-                        {pendingHotfixes - criticalHotfixes}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        Normal
-                      </Typography>
-                    </Paper>
-                  </Grid>
-                </Grid>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        {/* Bekleyen Acil Değişiklik Kartı */}
-        <Grid item xs={12} md={4}>
           <Card 
             elevation={12}
             onClick={() => navigate('/urgent-changes')}
@@ -1210,18 +1104,18 @@ const CustomerDashboardV2 = () => {
                     sx={{ 
                       width: 48, 
                       height: 48, 
-                      bgcolor: 'warning.main',
-                      boxShadow: '0 8px 16px rgba(255, 152, 0, 0.3)'
+                      bgcolor: 'info.main',
+                      boxShadow: '0 8px 16px rgba(2, 136, 209, 0.3)'
                     }}
                   >
-                    <UrgentIcon />
+                    <DependencyIcon />
                   </Avatar>
                   <Box>
                     <Typography variant="h6" fontWeight="bold">
-                      Acil Değişiklikler
+                      Bekleyen Bağımlılık Güncellemeleri
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                      Urgent güncellemeler
+                      Dependency güncellemeleri
                     </Typography>
                   </Box>
                 </Box>
@@ -1233,22 +1127,22 @@ const CustomerDashboardV2 = () => {
                 />
               </Box>
               
-              {/* Toplam Acil Değişiklik Sayısı */}
+              {/* Toplam Bağımlılık Güncellemesi Sayısı */}
               <Box sx={{ mb: 2 }}>
                 <Paper 
                   elevation={3}
                   sx={{ 
                     p: 2, 
-                    bgcolor: 'warning.main', 
+                    bgcolor: 'info.main', 
                     color: 'white', 
                     borderRadius: 2,
                     textAlign: 'center',
-                    background: 'linear-gradient(135deg, #f57c00 0%, #ef6c00 100%)',
-                    boxShadow: '0 4px 12px rgba(255, 152, 0, 0.3)'
+                    background: 'linear-gradient(135deg, #0288d1 0%, #01579b 100%)',
+                    boxShadow: '0 4px 12px rgba(2, 136, 209, 0.3)'
                   }}
                 >
                   <Typography variant="caption" sx={{ opacity: 0.9, display: 'block', mb: 0.5 }}>
-                    ⚡ Toplam Acil Değişiklik
+                    📦 Toplam Bağımlılık Güncellemesi
                   </Typography>
                   <Typography variant="h5" fontWeight="bold">
                     {pendingUrgents} Adet
@@ -1256,10 +1150,10 @@ const CustomerDashboardV2 = () => {
                 </Paper>
               </Box>
 
-              {/* Acil Değişiklik Detayı */}
+              {/* Bağımlılık Güncelleme Detayı */}
               <Box>
                 <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block', fontWeight: 600 }}>
-                  📊 Değişiklik Detayı
+                  📊 Güncelleme Detayı
                 </Typography>
                 <Grid container spacing={1.5}>
                   <Grid item xs={6}>
@@ -1281,7 +1175,7 @@ const CustomerDashboardV2 = () => {
                         {expiredUrgents}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        Zamanı Geçmiş
+                        Kritik
                       </Typography>
                     </Paper>
                   </Grid>
@@ -1290,17 +1184,17 @@ const CustomerDashboardV2 = () => {
                       elevation={2}
                       sx={{ 
                         p: 1.5, 
-                        bgcolor: '#e8f5e9', 
+                        bgcolor: '#e1f5fe', 
                         borderRadius: 2,
                         textAlign: 'center',
-                        border: '2px solid #4caf50',
+                        border: '2px solid #0288d1',
                         transition: 'transform 0.2s',
                         '&:hover': {
                           transform: 'scale(1.05)'
                         }
                       }}
                     >
-                      <Typography variant="h6" fontWeight="bold" color="success.dark">
+                      <Typography variant="h6" fontWeight="bold" color="info.dark">
                         {pendingUrgents - expiredUrgents}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
@@ -1406,9 +1300,20 @@ const CustomerDashboardV2 = () => {
                       >
                         <TableCell>
                           <Box>
-                            <Typography variant="body1" fontWeight="bold" color="primary.main">
-                              {version.version && !version.version.startsWith('v') ? `v${version.version}` : version.version}
-                            </Typography>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Typography variant="body1" fontWeight="bold" color="primary.main">
+                                {version.version && !version.version.startsWith('v') ? `v${version.version}` : version.version}
+                              </Typography>
+                              {version.isHotfix && (
+                                <Chip
+                                  icon={<HotfixIcon fontSize="small" />}
+                                  label="Hotfix"
+                                  color="error"
+                                  size="small"
+                                  sx={{ height: 20, fontSize: '0.7rem' }}
+                                />
+                              )}
+                            </Box>
                             {version.productName && (
                               <Typography variant="caption" color="text.secondary">
                                 {version.productName}

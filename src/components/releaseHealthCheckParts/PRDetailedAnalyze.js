@@ -293,7 +293,7 @@ const PRDetailedAnalyze = () => {
   );
 
   return (
-    <Accordion defaultExpanded>
+    <Accordion>
       <AccordionSummary expandIcon={<ExpandMoreIcon />}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <TimelineIcon color="primary" />
