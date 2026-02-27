@@ -1,0 +1,30 @@
+version: '3.8'
+
+# ReleaseHub360 — MCP Server (Azure PBI Analyzer)
+# Ana docker-compose ile birlikte kullanılabilir:
+#   docker compose -f ../../docker-compose.yml -f docker-compose.yml up
+#
+# Ya da standalone:
+#   docker compose up
+
+services:
+  mcp-server:
+    build: .
+    container_name: releasehub360-mcp-server
+    ports:
+      - "8000:8000"
+    environment:
+      - AZURE_DEVOPS_ORG=${AZURE_DEVOPS_ORG}
+      - AZURE_DEVOPS_PAT=${AZURE_DEVOPS_PAT}
+      - AZURE_DEVOPS_PROJECT=${AZURE_DEVOPS_PROJECT}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4}
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s

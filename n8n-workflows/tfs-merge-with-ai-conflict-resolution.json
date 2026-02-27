@@ -1,0 +1,776 @@
+{
+  "name": "TFS Source→Target Merge with AI Conflict Resolution",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "tfs-merge-start",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "tfs-merge-webhook"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "var1",
+              "name": "sourceDir",
+              "value": "={{ $json.sourceDir || '$/Project/Source' }}",
+              "type": "string"
+            },
+            {
+              "id": "var2",
+              "name": "targetDir",
+              "value": "={{ $json.targetDir || '$/Project/Target' }}",
+              "type": "string"
+            },
+            {
+              "id": "var3",
+              "name": "fileName",
+              "value": "={{ $json.fileName || 'CustomerService.cs' }}",
+              "type": "string"
+            },
+            {
+              "id": "var4",
+              "name": "workItemId",
+              "value": "={{ $json.workItemId || '12345' }}",
+              "type": "string"
+            },
+            {
+              "id": "var5",
+              "name": "tfsUrl",
+              "value": "https://tfs.company.com/tfs/DefaultCollection",
+              "type": "string"
+            },
+            {
+              "id": "var6",
+              "name": "tfsProject",
+              "value": "MyProject",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-variables",
+      "name": "Set Variables",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.tfsUrl }}/_apis/tfvc/items",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "azureDevOpsApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "path",
+              "value": "={{ $json.sourceDir }}/{{ $json.fileName }}"
+            },
+            {
+              "name": "includeContent",
+              "value": "true"
+            },
+            {
+              "name": "api-version",
+              "value": "7.0"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-source-file",
+      "name": "TFS - Get Source File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.tfsUrl }}/_apis/tfvc/items",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "azureDevOpsApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "path",
+              "value": "={{ $json.targetDir }}/{{ $json.fileName }}"
+            },
+            {
+              "name": "includeContent",
+              "value": "true"
+            },
+            {
+              "name": "api-version",
+              "value": "7.0"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-target-file",
+      "name": "TFS - Get Target File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get source and target content\nconst sourceItem = $input.all()[0].json;\nconst targetItem = $input.all()[1].json;\n\nconst sourceContent = sourceItem.content || '';\nconst targetContent = targetItem.content || '';\nconst fileName = $('Set Variables').first().json.fileName;\n\n// Check if files are different\nif (sourceContent === targetContent) {\n  return {\n    json: {\n      hasChanges: false,\n      fileName: fileName,\n      message: 'No changes detected',\n      skipMerge: true\n    }\n  };\n}\n\n// Base64 decode if needed\nlet sourceDecoded = sourceContent;\nlet targetDecoded = targetContent;\n\ntry {\n  sourceDecoded = Buffer.from(sourceContent, 'base64').toString('utf-8');\n  targetDecoded = Buffer.from(targetContent, 'base64').toString('utf-8');\n} catch (e) {\n  // Already decoded\n}\n\nreturn {\n  json: {\n    hasChanges: true,\n    fileName: fileName,\n    sourceContent: sourceDecoded,\n    targetContent: targetDecoded,\n    sourceVersion: sourceItem.version,\n    targetVersion: targetItem.version,\n    sourceChangesetId: sourceItem.changesetVersion,\n    targetChangesetId: targetItem.changesetVersion\n  }\n};"
+      },
+      "id": "check-differences",
+      "name": "Code - Check Differences",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition1",
+              "leftValue": "={{ $json.hasChanges }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-changes",
+      "name": "IF Has Changes",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.tfsUrl }}/_apis/tfvc/changesets",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "azureDevOpsApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"comment\": \"Auto-merge attempt: {{ $json.fileName }}\",\n  \"changes\": [\n    {\n      \"changeType\": \"edit\",\n      \"item\": {\n        \"path\": \"{{ $('Set Variables').first().json.targetDir }}/{{ $json.fileName }}\"\n      },\n      \"newContent\": {\n        \"content\": \"{{ $json.sourceContent }}\",\n        \"contentType\": \"rawtext\"\n      }\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "attempt-auto-merge",
+      "name": "TFS - Attempt Auto Merge",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1450, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition1",
+              "leftValue": "={{ $json.error || $json.message }}",
+              "rightValue": "conflict",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "if-has-conflict",
+      "name": "IF Has Conflict",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1650, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Simulate getting conflict details from TFS\nconst sourceContent = $('Code - Check Differences').first().json.sourceContent;\nconst targetContent = $('Code - Check Differences').first().json.targetContent;\nconst fileName = $('Code - Check Differences').first().json.fileName;\n\n// Simple diff to identify conflicts\nconst sourceLines = sourceContent.split('\\n');\nconst targetLines = targetContent.split('\\n');\n\nlet conflicts = [];\nlet conflictText = '';\n\nfor (let i = 0; i < Math.max(sourceLines.length, targetLines.length); i++) {\n  if (sourceLines[i] !== targetLines[i]) {\n    conflicts.push({\n      lineNumber: i + 1,\n      sourceLine: sourceLines[i] || '',\n      targetLine: targetLines[i] || ''\n    });\n    \n    conflictText += `Line ${i + 1}:\\n`;\n    conflictText += `SOURCE: ${sourceLines[i] || '(deleted)'}\\n`;\n    conflictText += `TARGET: ${targetLines[i] || '(deleted)'}\\n\\n`;\n  }\n}\n\nreturn {\n  json: {\n    fileName: fileName,\n    conflictCount: conflicts.length,\n    conflicts: conflicts,\n    conflictText: conflictText,\n    sourceContent: sourceContent,\n    targetContent: targetContent\n  }\n};"
+      },
+      "id": "get-conflict-details",
+      "name": "TFS - Get Conflict Details",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1850, 100]
+    },
+    {
+      "parameters": {
+        "resource": "text",
+        "operation": "message",
+        "modelId": "gpt-4-turbo-preview",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are an expert software engineer specializing in code merges and conflict resolution. Analyze merge conflicts and provide the best resolution with clear explanation. Return only valid code without markdown formatting."
+            },
+            {
+              "role": "user",
+              "content": "=Merge Conflict Analysis Request:\n\nFILE: {{ $json.fileName }}\nCONFLICT COUNT: {{ $json.conflictCount }}\n\nSOURCE CODE (from source branch):\n```\n{{ $json.sourceContent }}\n```\n\nTARGET CODE (current target branch):\n```\n{{ $json.targetContent }}\n```\n\nCONFLICT DETAILS:\n{{ $json.conflictText }}\n\nPlease provide:\n1. MERGED_CODE: Complete merged file content (no markdown, just code)\n2. EXPLANATION: Brief explanation of resolution strategy\n3. RISK_LEVEL: low/medium/high\n4. CONFIDENCE: 0-100%\n\nFormat response as JSON:\n{\n  \"mergedCode\": \"...\",\n  \"explanation\": \"...\",\n  \"riskLevel\": \"...\",\n  \"confidence\": ...\n}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 4000
+        }
+      },
+      "id": "ai-analyze-conflict",
+      "name": "AI - Analyze Conflict (OpenAI)",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.3,
+      "position": [2050, 100],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-credentials",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI response\nconst aiResponse = $input.first().json.message?.content || $input.first().json.text;\nconst fileName = $('TFS - Get Conflict Details').first().json.fileName;\n\nlet parsedResponse;\ntry {\n  // Try to parse as JSON\n  const jsonMatch = aiResponse.match(/\\{[\\s\\S]*\\}/);\n  if (jsonMatch) {\n    parsedResponse = JSON.parse(jsonMatch[0]);\n  } else {\n    // Fallback if not JSON formatted\n    parsedResponse = {\n      mergedCode: aiResponse,\n      explanation: 'AI provided merged code',\n      riskLevel: 'medium',\n      confidence: 75\n    };\n  }\n} catch (e) {\n  parsedResponse = {\n    mergedCode: aiResponse,\n    explanation: 'AI response parsing failed, using raw output',\n    riskLevel: 'high',\n    confidence: 50\n  };\n}\n\nreturn {\n  json: {\n    fileName: fileName,\n    aiMergedCode: parsedResponse.mergedCode,\n    aiExplanation: parsedResponse.explanation,\n    aiRiskLevel: parsedResponse.riskLevel || 'medium',\n    aiConfidence: parsedResponse.confidence || 75,\n    conflictDetails: $('TFS - Get Conflict Details').first().json.conflictText,\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "id": "parse-ai-response",
+      "name": "Code - Parse AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2250, 100]
+    },
+    {
+      "parameters": {
+        "channel": "merge-approvals",
+        "text": "=🔀 *Merge Conflict Detected*",
+        "attachments": [],
+        "blocksUi": {
+          "blocksValues": [
+            {
+              "type": "section",
+              "text": {
+                "text": "=*File:* `{{ $json.fileName }}`\\n*Risk Level:* {{ $json.aiRiskLevel }}\\n*AI Confidence:* {{ $json.aiConfidence }}%"
+              }
+            },
+            {
+              "type": "section",
+              "text": {
+                "text": "=*AI Explanation:*\\n{{ $json.aiExplanation }}"
+              }
+            },
+            {
+              "type": "section",
+              "text": {
+                "text": "=*Conflict Details:*\\n```{{ $json.conflictDetails }}```"
+              }
+            },
+            {
+              "type": "section",
+              "text": {
+                "text": "=*Suggested Merge:*\\n```{{ $json.aiMergedCode.substring(0, 500) }}{{ $json.aiMergedCode.length > 500 ? '...' : '' }}```"
+              }
+            },
+            {
+              "type": "actions",
+              "elements": [
+                {
+                  "type": "button",
+                  "text": "✅ Accept AI Solution",
+                  "style": "primary",
+                  "value": "accept_ai",
+                  "action_id": "merge_accept_ai"
+                },
+                {
+                  "type": "button",
+                  "text": "✏️ Manual Edit Required",
+                  "value": "manual_edit",
+                  "action_id": "merge_manual"
+                },
+                {
+                  "type": "button",
+                  "text": "⏭️ Skip File",
+                  "style": "danger",
+                  "value": "skip",
+                  "action_id": "merge_skip"
+                }
+              ]
+            }
+          ]
+        },
+        "otherOptions": {}
+      },
+      "id": "slack-approval-request",
+      "name": "Slack - Send Approval Request",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [2450, 100],
+      "credentials": {
+        "slackApi": {
+          "id": "slack-credentials",
+          "name": "Slack API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "options": {
+          "timeout": 1800
+        }
+      },
+      "id": "wait-for-approval",
+      "name": "Wait for User Response",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2650, 100],
+      "webhookId": "approval-response-webhook"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition1",
+              "leftValue": "={{ $json.action || $json.body?.action }}",
+              "rightValue": "accept_ai",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "switch-on-action",
+      "name": "Switch on User Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [2850, 100]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "assign1",
+              "name": "finalMergedCode",
+              "value": "={{ $('Code - Parse AI Response').first().json.aiMergedCode }}",
+              "type": "string"
+            },
+            {
+              "id": "assign2",
+              "name": "resolutionMethod",
+              "value": "ai_accepted",
+              "type": "string"
+            },
+            {
+              "id": "assign3",
+              "name": "fileName",
+              "value": "={{ $('Code - Parse AI Response').first().json.fileName }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "use-ai-solution",
+      "name": "Use AI Solution",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [3050, 50]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Set Variables').first().json.tfsUrl }}/_apis/tfvc/changesets",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "azureDevOpsApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"comment\": \"Merged {{ $json.fileName }} with AI assistance - Work Item #{{ $('Set Variables').first().json.workItemId }}\",\n  \"changes\": [\n    {\n      \"changeType\": \"edit\",\n      \"item\": {\n        \"path\": \"{{ $('Set Variables').first().json.targetDir }}/{{ $json.fileName }}\"\n      },\n      \"newContent\": {\n        \"content\": \"{{ $json.finalMergedCode }}\",\n        \"contentType\": \"rawtext\"\n      }\n    }\n  ],\n  \"workItems\": [\n    {\n      \"id\": {{ $('Set Variables').first().json.workItemId }}\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "commit-merged-file",
+      "name": "TFS - Commit Merged File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [3250, 100]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO merge_history (\n  file_name,\n  source_version,\n  target_version,\n  had_conflict,\n  ai_used,\n  resolution_method,\n  merged_content,\n  work_item_id,\n  ai_confidence,\n  ai_risk_level,\n  changeset_id,\n  created_at\n) VALUES (\n  '{{ $('Use AI Solution').first().json.fileName }}',\n  '{{ $('Code - Check Differences').first().json.sourceVersion }}',\n  '{{ $('Code - Check Differences').first().json.targetVersion }}',\n  true,\n  true,\n  '{{ $('Use AI Solution').first().json.resolutionMethod }}',\n  '{{ $('Use AI Solution').first().json.finalMergedCode }}',\n  '{{ $('Set Variables').first().json.workItemId }}',\n  {{ $('Code - Parse AI Response').first().json.aiConfidence }},\n  '{{ $('Code - Parse AI Response').first().json.aiRiskLevel }}',\n  {{ $json.changesetId || 0 }},\n  NOW()\n)",
+        "options": {}
+      },
+      "id": "log-to-database",
+      "name": "PostgreSQL - Log Merge",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [3450, 100],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credentials",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "merge-notifications",
+        "text": "=✅ *Merge Completed Successfully*",
+        "attachments": [],
+        "blocksUi": {
+          "blocksValues": [
+            {
+              "type": "section",
+              "text": {
+                "text": "=*File:* `{{ $('Use AI Solution').first().json.fileName }}`\\n*Method:* {{ $('Use AI Solution').first().json.resolutionMethod }}\\n*Changeset:* #{{ $('TFS - Commit Merged File').first().json.changesetId }}\\n*Work Item:* #{{ $('Set Variables').first().json.workItemId }}"
+              }
+            },
+            {
+              "type": "section",
+              "text": {
+                "text": "=*AI Confidence:* {{ $('Code - Parse AI Response').first().json.aiConfidence }}%\\n*Risk Level:* {{ $('Code - Parse AI Response').first().json.aiRiskLevel }}"
+              }
+            },
+            {
+              "type": "actions",
+              "elements": [
+                {
+                  "type": "button",
+                  "text": "View in TFS",
+                  "url": "={{ $('Set Variables').first().json.tfsUrl }}/_versionControl/changeset/{{ $('TFS - Commit Merged File').first().json.changesetId }}",
+                  "action_id": "view_tfs"
+                }
+              ]
+            }
+          ]
+        },
+        "otherOptions": {}
+      },
+      "id": "slack-success-notification",
+      "name": "Slack - Success Notification",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [3650, 100],
+      "credentials": {
+        "slackApi": {
+          "id": "slack-credentials",
+          "name": "Slack API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"fileName\": \"{{ $('Use AI Solution').first().json.fileName }}\",\n  \"changesetId\": {{ $('TFS - Commit Merged File').first().json.changesetId }},\n  \"resolutionMethod\": \"{{ $('Use AI Solution').first().json.resolutionMethod }}\",\n  \"timestamp\": \"{{ $now }}\"\n}",
+        "options": {}
+      },
+      "id": "respond-to-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [3850, 100]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": false,\n  \"message\": \"No changes detected\",\n  \"fileName\": \"{{ $json.fileName }}\"\n}",
+        "options": {}
+      },
+      "id": "no-changes-response",
+      "name": "No Changes - Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1450, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"message\": \"Auto-merge successful\",\n  \"fileName\": \"{{ $('Code - Check Differences').first().json.fileName }}\",\n  \"changesetId\": {{ $json.changesetId }}\n}",
+        "options": {}
+      },
+      "id": "auto-merge-success-response",
+      "name": "Auto Merge Success - Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1850, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Set Variables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Variables": {
+      "main": [
+        [
+          {
+            "node": "TFS - Get Source File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TFS - Get Source File": {
+      "main": [
+        [
+          {
+            "node": "TFS - Get Target File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TFS - Get Target File": {
+      "main": [
+        [
+          {
+            "node": "Code - Check Differences",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Check Differences": {
+      "main": [
+        [
+          {
+            "node": "IF Has Changes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Has Changes": {
+      "main": [
+        [
+          {
+            "node": "TFS - Attempt Auto Merge",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Changes - Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TFS - Attempt Auto Merge": {
+      "main": [
+        [
+          {
+            "node": "IF Has Conflict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Has Conflict": {
+      "main": [
+        [
+          {
+            "node": "TFS - Get Conflict Details",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Auto Merge Success - Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TFS - Get Conflict Details": {
+      "main": [
+        [
+          {
+            "node": "AI - Analyze Conflict (OpenAI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI - Analyze Conflict (OpenAI)": {
+      "main": [
+        [
+          {
+            "node": "Code - Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Parse AI Response": {
+      "main": [
+        [
+          {
+            "node": "Slack - Send Approval Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack - Send Approval Request": {
+      "main": [
+        [
+          {
+            "node": "Wait for User Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for User Response": {
+      "main": [
+        [
+          {
+            "node": "Switch on User Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch on User Action": {
+      "main": [
+        [
+          {
+            "node": "Use AI Solution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use AI Solution": {
+      "main": [
+        [
+          {
+            "node": "TFS - Commit Merged File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TFS - Commit Merged File": {
+      "main": [
+        [
+          {
+            "node": "PostgreSQL - Log Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PostgreSQL - Log Merge": {
+      "main": [
+        [
+          {
+            "node": "Slack - Success Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack - Success Notification": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "createdAt": "2025-11-02T00:00:00.000Z",
+      "updatedAt": "2025-11-02T00:00:00.000Z",
+      "id": "1",
+      "name": "TFS"
+    },
+    {
+      "createdAt": "2025-11-02T00:00:00.000Z",
+      "updatedAt": "2025-11-02T00:00:00.000Z",
+      "id": "2",
+      "name": "AI"
+    },
+    {
+      "createdAt": "2025-11-02T00:00:00.000Z",
+      "updatedAt": "2025-11-02T00:00:00.000Z",
+      "id": "3",
+      "name": "Merge"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-11-02T00:00:00.000Z",
+  "versionId": "1"
+}

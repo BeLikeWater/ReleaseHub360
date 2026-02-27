@@ -1,0 +1,218 @@
+{
+  "name": "Release Notes — AI Auto Generate",
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json._backendUrl }}/api/release-notes",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json._token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "productVersionId",
+              "value": "={{ $json.productVersionId }}"
+            },
+            {
+              "name": "workitemId",
+              "value": "={{ $json.workitemId }}"
+            },
+            {
+              "name": "category",
+              "value": "={{ $json.category }}"
+            },
+            {
+              "name": "title",
+              "value": "={{ $json.title }}"
+            },
+            {
+              "name": "description",
+              "value": "={{ $json.description }}"
+            },
+            {
+              "name": "isBreaking",
+              "value": "={{ $json.isBreaking }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "80a6165f-5fe7-4f56-b4f9-e5adc87ba074",
+      "name": "Backend'e Kaydet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        0
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "release-notes-generate",
+        "options": {}
+      },
+      "id": "967bc008-4787-4042-b680-d684a5662bc9",
+      "name": "Start",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "601a8fe6-3f6f-423b-a4c2-79bcbf41522a"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Her work item ID i\\u00e7in ayr\\u0131 bir n8n item \\u00fcret (paralel i\\u015fleme)\nconst payload = $json[\"body\"];\n\nif (!payload.missingWorkItemIds || payload.missingWorkItemIds.length === 0) {\n  return [];\n}\n\npayload.missingWorkItemIds = payload.missingWorkItemIds.slice(26);\n\nreturn payload.missingWorkItemIds.map(workItemId => ({\n  json: {\n    workItemId: Number(workItemId),\n    versionId:    payload.versionId,\n    azureOrg:     payload.azureOrg,\n    azureProject: payload.azureProject,\n    azurePat:     payload.azurePat,\n    mcpServerUrl: payload.mcpServerUrl,\n    backendUrl:   payload.backendUrl,\n    token:        payload.token,\n  }\n}));"
+      },
+      "id": "9613b38b-8e7c-411f-81ed-854e8ad2c3e2",
+      "name": "DataPreparation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.mcpServerUrl }}/api/release-notes/structured-for-specific-pbi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "pbi_id",
+              "value": "={{ $json.workItemId }}"
+            },
+            {
+              "name": "language",
+              "value": "tr"
+            },
+            {
+              "name": "azure_org",
+              "value": "={{ $json.azureOrg }}"
+            },
+            {
+              "name": "azure_project",
+              "value": "={{ $json.azureProject }}"
+            },
+            {
+              "name": "azure_pat",
+              "value": "={{ $json.azurePat }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "id": "f1c8cf5a-a180-4c05-aa8c-1e25b832f4bf",
+      "name": "GenerateReleaseNoteMCP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// MCP yan\\u0131t\\u0131n\\u0131 release note DB format\\u0131na d\\u00f6n\\u00fc\\u015ft\\u00fcr\nconst mcpResp  = $input.item.json;\nconst ctx      = $node[\"DataPreparation\"].json;\n\n// MCP hata d\\u00f6nd\\u00fc veya bo\\u015f geldi\nif (!mcpResp || mcpResp.error || mcpResp.statusCode >= 400) {\n  console.log('MCP hata d\\u00f6nd\\u00fc, work item atlan\\u0131yor:', ctx.workItemId, mcpResp);\n  return [];  // Bu item'\\u0131 atla\n}\n\nconst rn = mcpResp.release_notes?.releaseNote ?? {};\nconst techTitle    = (rn.technical?.title    ?? '').trim();\nconst businessTitle = (rn.business?.title   ?? '').trim() || `Work Item #${ctx.workItemId}`;\nconst businessDesc  = (rn.business?.description  ?? '').trim();\nconst technicalDesc = (rn.technical?.description ?? '').trim();\n\nlet category = 'FEATURE';\n\nconst parts = [];\nif (businessDesc)  parts.push(businessDesc);\nif (technicalDesc && technicalDesc !== businessDesc) {\n  parts.push('---');\n  parts.push(technicalDesc);\n}\nconst description = parts.join('\\n\\n') || null;\n\nreturn [{\n  json: {\n    productVersionId: ctx.versionId,\n    workitemId:       String(ctx.workItemId),\n    category,\n    title:            businessTitle,\n    description,\n    isBreaking:       category === 'BREAKING',\n    // Kaydetme i\\u00e7in meta — geri\\u015f HTTP iste\\u011finden \\u00e7\\u0131kar\\u0131l\\u0131r\n    _backendUrl:      ctx.backendUrl,\n    _token:           ctx.token,\n  }\n}];"
+      },
+      "id": "0f42bac5-7064-46a9-bd2d-957b2f358cf4",
+      "name": "SaveModel",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "DataPreparation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DataPreparation": {
+      "main": [
+        [
+          {
+            "node": "GenerateReleaseNoteMCP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GenerateReleaseNoteMCP": {
+      "main": [
+        [
+          {
+            "node": "SaveModel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SaveModel": {
+      "main": [
+        [
+          {
+            "node": "Backend'e Kaydet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "tags": ["release-notes", "ai", "mcp", "automation"]
+}

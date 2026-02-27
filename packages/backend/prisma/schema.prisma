@@ -1,0 +1,390 @@
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "binary"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         String   @default("DEVELOPER") // ADMIN | RELEASE_MANAGER | DEVELOPER | VIEWER
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("users")
+}
+
+model Product {
+  id                String           @id @default(uuid())
+  name              String
+  description       String?
+  repoUrl           String?
+  serviceImageName  String?          // Docker image name e.g. 'cofins-backofficeportal'
+  deploymentType    String?          // 'docker' | 'dll-ftp' | 'code-sync'
+  isActive          Boolean          @default(true)
+  // Proje yönetim entegrasyonu
+  pmType            String?          // 'AZURE' | 'GITHUB' — şimdilik sadece AZURE
+  azureOrg              String?          // Azure DevOps org adı (örn: itsfindev)
+  azureProject          String?          // Azure DevOps proje adı (örn: etx) — CI/CD, work items
+  azureReleaseProject   String?          // Classic Release Management projesi (vsrm.dev.azure.com); boşsa azureProject kullanılır
+  azurePat              String?          // Azure DevOps Personal Access Token
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  versions     ProductVersion[]
+  services     Service[]
+  apis         Api[]
+  modules      Module[]
+  moduleGroups ModuleGroup[]
+
+  @@map("products")
+}
+
+model Service {
+  id                      String    @id @default(uuid())
+  productId               String
+  name                    String
+  description             String?
+  repoName                String?   // Azure DevOps repo name (e.g. "Cofins.BackOfficePortal")
+  repoUrl                 String?   // Full URL to the repository (optional)
+  pipelineName            String?   // Azure DevOps pipeline name
+  serviceImageName        String?   // Docker image name (e.g. "cofins-backofficeportal")
+  currentVersion          String?   // Last known deployed version (e.g. "1.0.20251009.4")
+  currentVersionCreatedAt DateTime? // Last deploy timestamp
+  releaseName             String?   // Azure DevOps Release Definition name (e.g. "MyService.CD")
+  releaseStage            String?   // Azure Classic Release stage to watch (e.g. "Production")
+  lastReleaseName         String?   // Last successful Azure release name (e.g. "Release-47") — updated by Baseline button
+  moduleId                String?   // Optional: which Module this service belongs to
+  port                    Int?
+  isActive                Boolean   @default(true)
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  product                 Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  module                  Module?   @relation(fields: [moduleId], references: [id])
+  releaseSnapshots        ServiceReleaseSnapshot[]
+
+  @@map("services")
+}
+
+model Api {
+  id             String   @id @default(uuid())
+  productId      String
+  name           String
+  path           String
+  method         String   // GET | POST | PUT | PATCH | DELETE
+  description    String?
+  isBreaking     Boolean  @default(false)
+  isDeprecated   Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  product        Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("apis")
+}
+
+model ModuleGroup {
+  id          String   @id @default(uuid())
+  productId   String
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  modules     Module[]
+
+  @@map("module_groups")
+}
+
+model Module {
+  id            String       @id @default(uuid())
+  productId     String
+  moduleGroupId String?
+  name          String
+  description   String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  product       Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  moduleGroup   ModuleGroup? @relation(fields: [moduleGroupId], references: [id])
+  services      Service[]
+
+  @@map("modules")
+}
+
+model ProductVersion {
+  id              String          @id @default(uuid())
+  productId       String
+  version         String
+  phase           String          @default("PLANNED") // PLANNED | DEVELOPMENT | RC | STAGING | PRODUCTION | ARCHIVED
+  isHotfix        Boolean         @default(false)
+  masterStartDate DateTime?       // Firebase: start of master branch integration
+  testDate        DateTime?       // Firebase: planned test/QA date
+  preProdDate     DateTime?       // Firebase: pre-production deployment date
+  targetDate      DateTime?
+  releaseDate     DateTime?
+  description     String?
+  notesPublished  Boolean         @default(false)
+  createdBy       String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  product         Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  releaseNotes    ReleaseNote[]
+  hotfixRequests  HotfixRequest[]
+  releaseTodos    ReleaseTodo[]
+  systemChanges   SystemChange[]
+  customerMappings CustomerProductMapping[]
+  serviceSnapshots ServiceReleaseSnapshot[]
+
+  @@unique([productId, version])
+  @@map("product_versions")
+}
+
+model ReleaseNote {
+  id               String         @id @default(uuid())
+  productVersionId String
+  workitemId       String?        // Azure DevOps work item ID (from Firebase migration)
+  category         String         // FEATURE | BUG | SECURITY | BREAKING | PERFORMANCE | DEPRECATED
+  title            String
+  description      String?
+  isBreaking       Boolean        @default(false)
+  sortOrder        Int            @default(0)
+  createdBy        String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  productVersion   ProductVersion @relation(fields: [productVersionId], references: [id], onDelete: Cascade)
+
+  @@map("release_notes")
+}
+
+model SystemChange {
+  id               String         @id @default(uuid())
+  productVersionId String?
+  apiPath          String?
+  changeType       String         // FEATURE | BREAKING | BUG | PERFORMANCE | SECURITY
+  title            String
+  description      String?
+  previousValue    String?
+  newValue         String?
+  isBreaking       Boolean        @default(false)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  productVersion   ProductVersion? @relation(fields: [productVersionId], references: [id], onDelete: Cascade)
+
+  @@map("system_changes")
+}
+
+model Customer {
+  id                   String                   @id @default(uuid())
+  name                 String
+  code                 String                   @unique
+  contactEmail         String?
+  contactPhone         String?
+  address              String?
+  notes                String?
+  tenantName           String?                  // e.g. 'ktbank-prod'
+  supportSuffix        String?                  // e.g. 'ktbank' (used in support email suffix)
+  emailDomain          String?                  // e.g. 'kt-bank.de'
+  devOpsEmails         String[]                 @default([])
+  approverEmails       String[]                 @default([])
+  environments         String[]                 @default([])  // e.g. ['Test', 'Prep', 'Prod']
+  azureReleaseTemplate String?                  // e.g. 'ktbank-release-template-v1'
+  isActive             Boolean                  @default(true)
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+  productMappings CustomerProductMapping[]
+  serviceMappings CustomerServiceMapping[]
+  branches        CustomerBranch[]
+
+  @@map("customers")
+}
+
+model CustomerProductMapping {
+  id               String         @id @default(uuid())
+  customerId       String
+  productVersionId String
+  branch           String?
+  environment      String?
+  notes            String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  customer         Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  productVersion   ProductVersion @relation(fields: [productVersionId], references: [id])
+
+  @@unique([customerId, productVersionId])
+  @@map("customer_product_mappings")
+}
+
+model CustomerServiceMapping {
+  id          String   @id @default(uuid())
+  customerId  String
+  serviceId   String
+  port        Int?
+  branch      String?
+  environment String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@map("customer_service_mappings")
+}
+
+model CustomerBranch {
+  id          String        @id @default(uuid())
+  customerId  String
+  branchName  String
+  repoUrl     String?       // Full repo URL (renamed from repoPath)
+  repoName    String?       // Short repo name e.g. 'cofins-backofficeportal'
+  baseBranch  String?       // Default base branch e.g. 'master'
+  description String?
+  isActive    Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  customer    Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  syncHistory SyncHistory[]
+
+  @@map("customer_branches")
+}
+
+model SyncHistory {
+  id               String         @id @default(uuid())
+  customerBranchId String
+  sourceBranch     String
+  targetBranch     String
+  syncBranchName   String?        // Auto-generated sync branch e.g. 'sync/...'
+  status           String         // PENDING | RUNNING | SUCCESS | CONFLICT | FAILED
+  conflictDetails  Json?
+  resolvedBy       String?        // AI | MANUAL | SKIPPED
+  triggeredBy      String?
+  mergeCommitId    String?        // Git commit hash on successful merge
+  payload          Json?          // prIds, prDetails, mergedPRs
+  completedAt      DateTime?
+  createdAt        DateTime       @default(now())
+  customerBranch   CustomerBranch @relation(fields: [customerBranchId], references: [id])
+
+  @@map("sync_history")
+}
+
+model HotfixRequest {
+  id               String         @id @default(uuid())
+  productVersionId String
+  title            String
+  description      String
+  severity         String         @default("MEDIUM") // LOW | MEDIUM | HIGH | CRITICAL
+  status           String         @default("PENDING") // PENDING | APPROVED | REJECTED | IN_PROGRESS | DEPLOYED
+  prUrl            String?
+  branchName       String?
+  customerImpact   String?
+  requestedBy      String
+  approvals        Json?          // array of { userId, role, status, timestamp, note }
+  rejectionReason  String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  productVersion   ProductVersion @relation(fields: [productVersionId], references: [id])
+
+  @@map("hotfix_requests")
+}
+
+model ReleaseTodo {
+  id               String          @id @default(uuid())
+  productVersionId String?
+  templateId       String?         // TodoTemplate id if from template
+  title            String
+  description      String?
+  category         String          @default("TECHNICAL") // TECHNICAL | OPERATIONAL | COMMUNICATION | APPROVAL
+  priority         String          @default("P1")         // P0 | P1 | P2 | P3
+  timing           String          @default("PRE")        // PRE | DURING | POST
+  isCompleted      Boolean         @default(false)
+  completedBy      String?
+  completedAt      DateTime?
+  sortOrder        Int             @default(0)
+  isTemplate       Boolean         @default(false)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  productVersion   ProductVersion? @relation(fields: [productVersionId], references: [id])
+
+  @@map("release_todos")
+}
+
+// Her servisin son yayınlanan release anını kaydet.
+// PR delta bu tablodaki releasedAt zaman damgasına göre hesaplanır.
+model ServiceReleaseSnapshot {
+  id               String         @id @default(uuid())
+  serviceId        String
+  productVersionId String
+  releaseName      String?        // "Release-47" veya otomatik: "{product}-{version}-{tarih}"
+  releasedAt       DateTime       // Snapshot anı UTC — PR delta anchor'ı
+  prIds            Json           // Array of { prId, title, mergeDate, repoName }
+  publishedBy      String?        // User.id
+  notes            String?
+  createdAt        DateTime       @default(now())
+
+  service          Service        @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  productVersion   ProductVersion @relation(fields: [productVersionId], references: [id])
+
+  @@index([serviceId, releasedAt(sort: Desc)])
+  @@map("service_release_snapshots")
+}
+
+model UrgentChange {
+  id              String   @id @default(uuid())
+  title           String
+  description     String
+  priority        String   @default("MEDIUM") // LOW | MEDIUM | HIGH | CRITICAL
+  status          String   @default("OPEN")   // OPEN | IN_PROGRESS | RESOLVED | CANCELLED
+  affectedProducts Json?   // array of product ids
+  workaroundExists Boolean @default(false)
+  customerImpact  String?
+  requestedBy     String
+  comments        Json?    // array of { userId, message, timestamp }
+  resolvedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("urgent_changes")
+}
+
+model Notification {
+  id         String   @id @default(uuid())
+  userId     String
+  type       String   // ACTION_REQUIRED | WARNING | INFO | SUCCESS
+  title      String
+  message    String
+  linkUrl    String?
+  isRead     Boolean  @default(false)
+  readAt     DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+model WorkflowHistory {
+  id            String    @id @default(uuid())
+  workflowType  String    // n8n workflow type
+  n8nWorkflowId String?
+  triggeredBy   String?
+  status        String    // PENDING | SUCCESS | FAILED
+  payload       Json?
+  result        Json?
+  errorMessage  String?
+  completedAt   DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@map("workflow_history")
+}
+
+model Setting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String   // encrypted when sensitive
+  category  String   // TFS | N8N | MCP | GENERAL | SECURITY
+  isSensitive Boolean @default(false)
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}

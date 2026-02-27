@@ -1,0 +1,152 @@
+{
+  "name": "Azure PBI AI Release Notes Generator",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "1",
+      "name": "When clicking 'Test workflow'",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "values": {
+          "number": [
+            {
+              "name": "pbi_id",
+              "value": 288274
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2",
+      "name": "Set PBI ID",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://host.docker.internal:8083/api/release-notes/ai-technical",
+        "authentication": "none",
+        "requestMethod": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"pbi_id\": $json.pbi_id } }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "3",
+      "name": "Generate AI Technical Notes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [690, 200]
+    },
+    {
+      "parameters": {
+        "url": "http://host.docker.internal:8083/api/release-notes/ai-business",
+        "authentication": "none",
+        "requestMethod": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"pbi_id\": $json.pbi_id } }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "4",
+      "name": "Generate AI Business Notes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [690, 400]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "5",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const technical = $input.item.json[0]?.release_notes || 'No technical notes';\nconst business = $input.item.json[1]?.release_notes || 'No business notes';\n\nconst combined = `# Combined Release Notes\\n\\n## Business Overview\\n\\n${business}\\n\\n---\\n\\n## Technical Details\\n\\n${technical}`;\n\nreturn {\n  technical_notes: technical,\n  business_notes: business,\n  combined_notes: combined,\n  pbi_id: $input.item.json.pbi_id || 288274\n};"
+      },
+      "id": "6",
+      "name": "Format Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1130, 300]
+    }
+  ],
+  "connections": {
+    "When clicking 'Test workflow'": {
+      "main": [
+        [
+          {
+            "node": "Set PBI ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set PBI ID": {
+      "main": [
+        [
+          {
+            "node": "Generate AI Technical Notes",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Generate AI Business Notes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate AI Technical Notes": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate AI Business Notes": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Format Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {}
+}

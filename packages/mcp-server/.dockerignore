@@ -1,0 +1,76 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Environment variables
+.env
+.env.local
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+!README.md
+
+# Test files
+test_*.py
+test_*.sh
+debug_*.py
+*_test_output.json
+
+# HTML reports
+*.html
+
+# Config files (security)
+claude_desktop_config.json
+
+# Workflows
+n8n_workflow_example.json
+
+# Scripts
+*.sh
+!start_api_server.sh
+
+# Other
+dlp_findings_report.html
+releases_test_output.json
