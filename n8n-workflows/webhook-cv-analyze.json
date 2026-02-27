@@ -1,0 +1,161 @@
+{
+  "name": "CV Analyze — Role Compatibility Scorer",
+  "nodes": [
+    {
+      "id": "node-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 400],
+      "webhookId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cv-analyze",
+        "responseMode": "lastNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-validate-input",
+      "name": "Validate & Prepare Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 400],
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\n\nconst roleDescription = body.role_description || '';\nconst cvContent = body.cv_content || '';\nconst mcpServerUrl = body.mcp_server_url || 'http://localhost:8083';\n\nif (!roleDescription.trim()) {\n  return [{ json: { _error: true, message: 'role_description alanı zorunludur.' } }];\n}\nif (!cvContent.trim()) {\n  return [{ json: { _error: true, message: 'cv_content alanı zorunludur.' } }];\n}\n\nif (roleDescription.length > 10000) {\n  return [{ json: { _error: true, message: 'role_description 10.000 karakteri aşamaz.' } }];\n}\nif (cvContent.length > 30000) {\n  return [{ json: { _error: true, message: 'cv_content 30.000 karakteri aşamaz.' } }];\n}\n\nreturn [{\n  json: {\n    _error: false,\n    role_description: roleDescription.trim(),\n    cv_content: cvContent.trim(),\n    mcpServerUrl\n  }\n}];"
+      }
+    },
+    {
+      "id": "node-check-error",
+      "name": "Input OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 400],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "cond-no-error",
+              "leftValue": "={{ $json._error }}",
+              "rightValue": false,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "node-analyze-cv",
+      "name": "Analyze CV via MCP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 280],
+      "continueOnFail": true,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.mcpServerUrl }}/api/ai/analyze-cv",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "role_description", "value": "={{ $json.role_description }}" },
+            { "name": "cv_content", "value": "={{ $json.cv_content }}" }
+          ]
+        },
+        "options": {
+          "timeout": 90000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "node-format-success",
+      "name": "Format Analysis Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1160, 280],
+      "parameters": {
+        "jsCode": "const resp = $input.item.json;\n\n// HTTP error veya MCP hatası kontrolü\nif (resp.error || (resp.statusCode && resp.statusCode >= 400)) {\n  const detail = resp.detail || resp.message || resp.error || 'MCP server hatası';\n  return [{\n    json: {\n      success: false,\n      error: detail,\n      hint: 'MCP server çalışıyor mu? OPENAI_API_KEY veya AZURE_OPENAI_ENDPOINT ayarlanmış mı?'\n    }\n  }];\n}\n\nconst score = resp.score ?? 0;\nconst verdict = resp.verdict || '';\nconst summary = resp.summary || '';\nconst strengths = resp.strengths || [];\nconst gaps = resp.gaps || [];\nconst recommendation = resp.recommendation || '';\nconst model = resp.model || '';\nconst provider = resp.provider || '';\n\n// Skor rengi / etiketi\nlet scoreLabel = '';\nif (score >= 85) scoreLabel = '🟢 Excellent Match';\nelse if (score >= 70) scoreLabel = '🔵 Good Match';\nelse if (score >= 50) scoreLabel = '🟡 Partial Match';\nelse if (score >= 25) scoreLabel = '🟠 Poor Match';\nelse scoreLabel = '🔴 Not Suitable';\n\nreturn [{\n  json: {\n    success: true,\n    score,\n    score_label: scoreLabel,\n    verdict,\n    summary,\n    strengths,\n    gaps,\n    recommendation,\n    analyzed_by: { model, provider },\n    analyzed_at: new Date().toISOString()\n  }\n}];"
+      }
+    },
+    {
+      "id": "node-respond-success",
+      "name": "Respond with Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, 280],
+      "parameters": {
+        "jsCode": "return [{ json: $input.first().json }];"
+      }
+    },
+    {
+      "id": "node-respond-error",
+      "name": "Respond with Validation Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 540],
+      "parameters": {
+        "jsCode": "return [{ json: { success: false, error: $input.first().json.message } }];"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          { "node": "Validate & Prepare Input", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Validate & Prepare Input": {
+      "main": [
+        [
+          { "node": "Input OK?", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Input OK?": {
+      "main": [
+        [
+          { "node": "Analyze CV via MCP", "type": "main", "index": 0 }
+        ],
+        [
+          { "node": "Respond with Validation Error", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Analyze CV via MCP": {
+      "main": [
+        [
+          { "node": "Format Analysis Result", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Format Analysis Result": {
+      "main": [
+        [
+          { "node": "Respond with Result", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "errorWorkflow": ""
+  },
+  "tags": ["cv", "ai", "hr", "mcp"]
+}

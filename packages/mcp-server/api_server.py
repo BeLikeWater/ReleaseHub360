@@ -1458,6 +1458,266 @@ Scoring guide:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── Customer Version Sync ─────────────────────────────────────────────────────
+
+import asyncio as _asyncio
+import uuid as _uuid_mod
+
+# In-memory job store for async cherry-pick jobs.
+# Keys: jobId (str), Values: job state dict.
+_cherry_pick_jobs: dict[str, dict] = {}
+
+
+class DeltaDetailsRequest(AzureCredsFields):
+    """Payload for fetching PR delta details and grouping by work item."""
+    pr_ids: list[int]  # PR IDs to fetch details for
+
+
+class CustomerBranchPRsRequest(AzureCredsFields):
+    """Payload for listing completed PRs in a customer branch."""
+    repository_name: str
+    branch_name: str   # e.g. "pre_master"
+    top: int = 200
+
+
+class AsyncCherryPickRequest(AzureCredsFields):
+    """Payload to start an async cherry-pick + PR creation job."""
+    repository_name: str
+    source_branch: str        # Product master branch (e.g. "master")
+    target_branch: str        # Customer base branch (e.g. "pre_master")
+    pr_ids: list[int]         # PRs to cherry-pick — already sorted by caller
+    sync_branch_prefix: str = "sync"  # Branch prefix; MCP appends timestamp
+    pr_title: str = "ReleaseHub360 Sync PR"
+    pr_description: str = ""
+
+
+@app.post("/api/code-sync/delta-details")
+async def get_delta_details(request: DeltaDetailsRequest):
+    """Given a list of PR IDs, fetch details from Azure DevOps and group by linked work item.
+
+    Returns:
+    ```json
+    {
+      "workitems": [{ "id": 4312, "title": "...", "type": "Feature", "state": "...",
+                      "prs": [{ "prId": 892, "title": "...", "mergeDate": "...",
+                                "author": "...", "repoName": "...", "commitIds": ["abc123"] }] }],
+      "unclassified": [...],
+      "total_pr_count": 47
+    }
+    ```
+    """
+    try:
+        client = get_client(request)
+        org = client.organization
+        project = client.project
+        hdrs = client.headers
+
+        async with httpx.AsyncClient(timeout=60.0) as http:
+            # Step 1: Fetch each PR detail + linked work item IDs
+            pr_details: list[dict] = []
+            for pr_id in request.pr_ids:
+                url = f"https://dev.azure.com/{org}/{project}/_apis/git/pullrequests/{pr_id}"
+                r = await http.get(url, headers=hdrs, params={"api-version": "7.1"})
+                if r.status_code != 200:
+                    continue
+                data = r.json()
+
+                repo_id = data.get("repository", {}).get("id", "")
+                repo_name = data.get("repository", {}).get("name", "unknown")
+                last_merge_commit = data.get("lastMergeCommit", {}).get("commitId", "")
+
+                # Linked work items for this PR
+                wi_url = (
+                    f"https://dev.azure.com/{org}/{project}/_apis/git/repositories"
+                    f"/{repo_id}/pullrequests/{pr_id}/workitems"
+                )
+                wi_r = await http.get(wi_url, headers=hdrs, params={"api-version": "7.1"})
+                wi_ids: list[int] = []
+                if wi_r.status_code == 200:
+                    for wi in wi_r.json().get("value", []):
+                        wi_id = wi.get("id")
+                        if wi_id:
+                            wi_ids.append(int(wi_id))
+
+                pr_details.append({
+                    "prId": pr_id,
+                    "title": data.get("title", ""),
+                    "mergeDate": data.get("closedDate") or data.get("creationDate", ""),
+                    "author": data.get("createdBy", {}).get("displayName", ""),
+                    "repoName": repo_name,
+                    "commitIds": [last_merge_commit] if last_merge_commit else [],
+                    "wiIds": wi_ids,
+                })
+
+            # Step 2: Bulk-fetch work item metadata
+            all_wi_ids = list({wi_id for pr in pr_details for wi_id in pr["wiIds"]})
+            wi_map: dict[int, dict] = {}
+            if all_wi_ids:
+                wi_bulk_url = f"https://dev.azure.com/{org}/{project}/_apis/wit/workitems"
+                wi_bulk_r = await http.get(
+                    wi_bulk_url,
+                    headers=hdrs,
+                    params={"ids": ",".join(map(str, all_wi_ids)), "api-version": "7.1"},
+                )
+                if wi_bulk_r.status_code == 200:
+                    for wi_data in wi_bulk_r.json().get("value", []):
+                        fields = wi_data.get("fields", {})
+                        wi_map[wi_data["id"]] = {
+                            "id": wi_data["id"],
+                            "title": fields.get("System.Title", ""),
+                            "type": fields.get("System.WorkItemType", "Unknown"),
+                            "state": fields.get("System.State", ""),
+                        }
+
+            # Step 3: Group PRs by first linked work item
+            workitem_groups: dict[int, dict] = {}
+            unclassified: list[dict] = []
+
+            for pr in pr_details:
+                pr_entry = {k: v for k, v in pr.items() if k != "wiIds"}
+                if not pr["wiIds"]:
+                    unclassified.append(pr_entry)
+                    continue
+                wi_id = pr["wiIds"][0]
+                if wi_id not in workitem_groups:
+                    wi_info = wi_map.get(wi_id, {
+                        "id": wi_id, "title": str(wi_id), "type": "Unknown", "state": "",
+                    })
+                    workitem_groups[wi_id] = {**wi_info, "prs": []}
+                workitem_groups[wi_id]["prs"].append(pr_entry)
+
+            return {
+                "workitems": list(workitem_groups.values()),
+                "unclassified": unclassified,
+                "total_pr_count": len(pr_details),
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/code-sync/customer-branch-prs")
+async def get_customer_branch_prs(request: CustomerBranchPRsRequest):
+    """Get completed PRs merged into a customer branch.
+
+    Returns normalized list of PRs with syncSource marker
+    (RELEASEHUB if source branch starts with 'sync/', otherwise MANUAL).
+    """
+    try:
+        result = await get_client(request).get_completed_prs_by_target_branch(
+            request.repository_name,
+            request.branch_name,
+        )
+        raw_prs = result.get("pull_requests", [])
+        normalized = []
+        for pr in raw_prs[: request.top]:
+            src_branch = pr.get("source_branch", "")
+            normalized.append({
+                "prId": pr.get("pull_request_id"),
+                "title": pr.get("title", ""),
+                "mergeDate": pr.get("closed_date") or pr.get("creation_date", ""),
+                "author": pr.get("created_by", ""),
+                "sourceBranch": src_branch,
+                "url": pr.get("url", ""),
+                "syncSource": "RELEASEHUB" if src_branch.startswith("sync/") else "MANUAL",
+            })
+        return {"prs": normalized, "total": len(normalized)}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/code-sync/async-cherry-pick")
+async def start_async_cherry_pick(request: AsyncCherryPickRequest):
+    """Start an async cherry-pick + PR creation job.
+
+    Immediately returns `{ "jobId": "uuid" }`. Caller polls
+    `GET /api/code-sync/async-cherry-pick/{jobId}` for status.
+    """
+    job_id = str(_uuid_mod.uuid4())
+    _cherry_pick_jobs[job_id] = {
+        "status": "RUNNING",
+        "progress": {"total": len(request.pr_ids), "done": 0, "current": None},
+        "result": None,
+        "conflict": None,
+        "syncBranchName": None,
+        "error": None,
+    }
+
+    async def _run() -> None:
+        try:
+            result = await get_client(request).execute_code_sync(
+                request.repository_name,
+                request.source_branch,
+                request.target_branch,
+                request.pr_ids,
+                False,                      # auto_resolve_conflicts
+                request.sync_branch_prefix, # branch prefix
+            )
+            status = (result.get("status") or "failed").upper()
+            sync_branch = result.get("sync_branch_name") or result.get("syncBranchName")
+
+            if status == "SUCCESS":
+                pr_created = result.get("pr_created") or {}
+                _cherry_pick_jobs[job_id].update({
+                    "status": "SUCCESS",
+                    "syncBranchName": sync_branch,
+                    "progress": {
+                        "total": len(request.pr_ids),
+                        "done": len(request.pr_ids),
+                        "current": None,
+                    },
+                    "result": {
+                        "prUrl": pr_created.get("pr_url") or pr_created.get("url", ""),
+                        "prId": pr_created.get("pr_id") or pr_created.get("pullRequestId"),
+                    },
+                })
+            elif status == "CONFLICT":
+                conflicts = result.get("conflicts") or []
+                conflict_pr = next(
+                    (c.get("pr_id") or c.get("pull_request_id") for c in conflicts if c),
+                    None,
+                )
+                conflict_files = [
+                    c.get("file") or c.get("path", "") for c in conflicts
+                ]
+                merged_count = len(result.get("merged_prs") or [])
+                _cherry_pick_jobs[job_id].update({
+                    "status": "CONFLICT",
+                    "syncBranchName": sync_branch,
+                    "progress": {
+                        "total": len(request.pr_ids),
+                        "done": merged_count,
+                        "current": conflict_pr,
+                    },
+                    "conflict": {"prId": conflict_pr, "files": conflict_files},
+                })
+            else:
+                _cherry_pick_jobs[job_id].update({
+                    "status": "FAILED",
+                    "syncBranchName": sync_branch,
+                    "error": result.get("error") or result.get("message") or "Unknown error",
+                })
+        except Exception as exc:
+            _cherry_pick_jobs[job_id].update({"status": "FAILED", "error": str(exc)})
+
+    _asyncio.create_task(_run())
+    return {"jobId": job_id}
+
+
+@app.get("/api/code-sync/async-cherry-pick/{job_id}")
+async def get_cherry_pick_status(job_id: str):
+    """Poll the status of an async cherry-pick job."""
+    job = _cherry_pick_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+    return job
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8083)
