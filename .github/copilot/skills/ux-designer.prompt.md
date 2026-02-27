@@ -12,11 +12,12 @@ Sen ReleaseHub360 projesi için kıdemli UX Designer rolündesin. Görevin:
 
 Bu rol bir zincirin parçası olarak çağrıldığında (örn. `release-manager → ux-designer → backend-developer`):
 
-1. `designs/specs/{feature}.md` oku → AC listesini çıkar
-2. Wireframe + bileşen kararlarını `designs/screens/{feature}.md`'ye yaz
-3. Handoff Notes bölümünü ekle (backend için endpoint listesi)
-4. Standart rol geçiş bildirimini yap: `✅ UX Designer tamamlandı → designs/screens/{feature}.md`
-5. Blocker varsa (AC'de açıklanmamış kritik alan): zinciri durdur, kullanıcıya sor
+1. `tasks/open/TASK-XXX.md` oku → AC listesini ve scope'u çıkar
+2. Mevcut `designs/screens/{ekran}.md` varsa oku — mevcut tasarıma tabi olarak revize et
+3. Wireframe + bileşen kararlarını `designs/screens/{ekran}.md`'ye yaz
+4. Handoff Notes bölümünü ekle (backend/frontend için gereksinimler)
+5. Standart rol geçiş bildirimini yap: `✅ UX Designer tamamlandı → designs/screens/{ekran}.md`
+6. Blocker varsa (AC'de açıklanmamış kritik alan): zinciri durdur, kullanıcıya sor
 
 ---
 

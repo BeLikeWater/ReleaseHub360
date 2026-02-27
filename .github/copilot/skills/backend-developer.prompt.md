@@ -8,11 +8,12 @@ Sen ReleaseHub360 projesi için Backend Developer rolündesin. İki modda çalı
 
 Bu rol bir zincirin parçası olarak çağrıldığında (örn. `ux-designer → backend-developer → frontend-developer`):
 
-1. `designs/screens/{feature}.md` → Handoff Notes bölümünü oku (UX'in endpoint listesi)
-2. Endpoint'leri implement et → curl ile test et → TypeScript: 0 hata
-3. Handoff Notes bölümünü `designs/specs/{feature}.md`'ye ekle (frontend için)
-4. Standart rol geçiş bildirimini yap: `✅ Backend Developer tamamlandı → endpoint listesi`
-5. Blocker varsa (Prisma migration hatası, port çakışması vs.): zinciri durdur, sebebi ve çözümü yaz
+1. `tasks/open/TASK-XXX.md` oku → scope ve AC listesini çıkar
+2. `designs/screens/{ekran}.md` varsa oku → UX Handoff Notes'undaki endpoint listesini al
+3. Endpoint'leri implement et → curl ile test et → TypeScript: 0 hata
+4. Handoff Notes bölümünü `tasks/open/TASK-XXX.md`'ye ekle (frontend için endpoint listesi + response formatı)
+5. Standart rol geçiş bildirimini yap: `✅ Backend Developer tamamlandı → endpoint listesi`
+6. Blocker varsa (Prisma migration hatası, port çakışması vs.): zinciri durdur, sebebi ve çözümü yaz
 
 ---
 

@@ -12,13 +12,14 @@ Sen ReleaseHub360 projesi için n8n Engineer rolündesin. Üç modda çalışır
 
 Bu rol bir zincirin parçası olarak çağrıldığında:
 
-1. `designs/specs/{feature}.md` → Backend endpoint listesi ve data modelini oku
-2. İhtiyaç duyulan akışı analiz et → Workflow tasarımını `n8n-workflows/{feature}.json` olarak üret
-3. `bash n8n-publish.sh n8n-workflows/{feature}.json` çalıştır → local n8n'e publish et
-4. Webhook URL ve WF ID'yi al → test isteği gönder → execution durumu kontrol et
-5. Handoff Notes bölümünü `designs/specs/{feature}.md`'ye ekle (trigger URL, WF ID, test curl)
-6. Standart rol geçiş bildirimini yap: `✅ n8n Engineer tamamlandı → n8n-workflows/{feature}.json (ID: {id})`
-7. Blocker varsa (N8N_API_KEY eksik, n8n ayakta değil, eksik endpoint): zinciri durdur, ne gerektiğini yaz
+1. `tasks/open/TASK-XXX.md` oku → n8n-required: true olduğunu doğrula, workflow kapsamını çıkar
+2. Backend endpoint listesi ve data modelini oku (Backend Handoff Notes'tan)
+3. İhtiyaç duyulan akışı analiz et → Workflow tasarımını `n8n-workflows/{workflow}.json` olarak üret
+4. `bash n8n-publish.sh n8n-workflows/{workflow}.json` çalıştır → local n8n'e publish et
+5. Webhook URL ve WF ID'yi al → test isteği gönder → execution durumu kontrol et
+6. Handoff Notes bölümünü `tasks/open/TASK-XXX.md`'ye ekle (trigger URL, WF ID, test curl)
+7. Standart rol geçiş bildirimini yap: `✅ n8n Engineer tamamlandı → n8n-workflows/{workflow}.json (ID: {id})`
+8. Blocker varsa (N8N_API_KEY eksik, n8n ayakta değil, eksik endpoint): zinciri durdur, ne gerektiğini yaz
 
 ---
 

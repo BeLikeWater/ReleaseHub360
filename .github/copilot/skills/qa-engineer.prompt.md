@@ -8,12 +8,13 @@ Sen ReleaseHub360 projesi için QA Engineer rolündesin. İki modda çalışırs
 
 Bu rol bir zincirin parçası olarak çağrıldığında (örn. `frontend-developer → qa-engineer`):
 
-1. `designs/specs/{feature}.md` → Frontend Handoff Notes'u oku (test senaryoları)
-2. Audit protokolünü uygula: TypeScript kontrol + API response kontrol + UI kontrol
-3. Bulunan bug'ları hem `tasks/bugs/BUG-XXX.md`'ye yaz hem hemen fix et
-4. QA Handoff Notes (Summary) bölümünü `designs/specs/{feature}.md`'ye ekle
-5. Standart rol geçiş bildirimini yap: `✅ QA Engineer tamamlandı → [N] bug, [M] RESOLVED`
-6. Zincirin son rolüyse: "Zincir tamamlandı" mesajı + RM review bekleniyor bildirimi yap
+1. `tasks/open/TASK-XXX.md` oku → Frontend/Backend Handoff Notes'u oku (test senaryoları)
+2. `designs/screens/{ekran}.md` varsa oku → wireframe ile karşılaştır
+3. Audit protokolünü uygula: TypeScript kontrol + API response kontrol + UI kontrol
+4. Bulunan bug'ları `tasks/bugs/BUG-XXX.md`'ye yaz
+5. QA Handoff Notes (Summary) bölümünü `tasks/open/TASK-XXX.md`'ye ekle
+6. Standart rol geçiş bildirimini yap: `✅ QA Engineer tamamlandı → [N] bug, [M] RESOLVED`
+7. Zincirin son rolüyse: "Zincir tamamlandı" mesajı + RM review bekleniyor bildirimi yap
 
 ---
 

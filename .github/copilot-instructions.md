@@ -1,53 +1,76 @@
 # ReleaseHub360 — Copilot Agent Instructions
 
-Her oturumda önce `ROADMAP.md` ve `.github/copilot/skills/` klasörünü oku. Aktif role uygun skill dosyasını referans al.
+Her oturumda önce `ROADMAP.md`, `tasks/README.md` ve `.github/copilot/skills/` klasörünü oku. Aktif role uygun skill dosyasını referans al.
 
 ---
 
-## QA → Dev Orchestration (Bug Pipeline)
+## Görev Pipeline'ı
 
-Bu projede QA, Frontend ve Backend agent'ları pipeline şeklinde çalışır:
+Tüm iş akışı `tasks/` dizini üzerinden yürür.
 
 ```
-QA Engineer      → Ekranları audit et → tasks/bugs/ klasörüne ticket yaz
-Frontend Dev     → tasks/bugs/ içindeki FRONTEND ticketları al → düzelt → RESOLVED işaretle
-Backend Dev      → tasks/bugs/ içindeki BACKEND ticketları al → düzelt → RESOLVED işaretle
+Release Manager
+  → tasks/open/TASK-XXX.md yazar  (scope + ux-required + n8n-required etiketli)
+        │
+        ├── ux-required: true  → UX Designer
+        │     → designs/screens/{ekran}.md günceller
+        │
+        ├── n8n-required: true → n8n Engineer
+        │     → n8n-workflows/{workflow}.json yazar + publish eder
+        │
+        ├── scope: FRONTEND    → Frontend Developer
+        │     → packages/frontend/src/pages/ günceller
+        │
+        └── scope: BACKEND     → Backend Developer
+              → packages/backend/src/routes/ günceller
+                    │
+                    ▼
+              QA Engineer
+                → Test eder → tasks/bugs/BUG-XXX.md yazar
+                    │
+                    ▼
+        Frontend Dev  → category:FRONTEND bug'ları alır → düzeltir → RESOLVED
+        Backend Dev   → category:BACKEND bug'ları alır → düzeltir → RESOLVED
+                    │
+                    ▼
+              QA → RESOLVED ticket'ları tasks/bugs/resolved/ taşır
 ```
 
 ### Rolleri Aktifleştirme
 
 | Kullanıcı komutu | Ne olur |
 |---|---|
-| `"QA Engineer olarak tüm ekranları test et"` | `.github/copilot/skills/qa-engineer.prompt.md` referans alınır, Screen Audit Mode çalıştırılır |
-| `"Frontend Developer olarak bug'ları düzelt"` | `tasks/bugs/` okunur, FRONTEND etiketli açık ticketlar fix edilir |
-| `"Backend Developer olarak bug'ları düzelt"` | `tasks/bugs/` okunur, BACKEND etiketli açık ticketlar fix edilir |
-| `"n8n Engineer olarak workflow yaz"` | `.github/copilot/skills/n8n-engineer.prompt.md` referans alınır, talep sürece dönüştürülür, `n8n-workflows/` altına JSON olarak kaydedilir |
-
-### QA Screen Audit Sırası
-
-Tüm ekranlar şu sırayla test edilir (önce riskli / veri yoğun sayfalar):
-1. Login → Dashboard → Products → Releases → Customers → diğerleri
+| `"release-manager olarak [konu] değerlendir"` | `tasks/open/TASK-XXX.md` oluşturulur |
+| `"ux-designer olarak tasarımı yap"` | `tasks/open/` okunur, `designs/screens/{ekran}.md` güncellenir |
+| `"backend-developer olarak geliştir"` | `tasks/open/` okunur, routes/schema güncellenir |
+| `"frontend-developer olarak geliştir"` | `tasks/open/` okunur, pages/ güncellenir |
+| `"n8n Engineer olarak workflow yaz"` | `tasks/open/` okunur, `n8n-workflows/` altına JSON yazılır + publish |
+| `"qa-engineer olarak test et"` | Ekranlar audit edilir, `tasks/bugs/BUG-XXX.md` yazılır |
+| `"frontend-developer olarak bug'ları düzelt"` | `tasks/bugs/` okunur, FRONTEND ticket'ları fix edilir |
+| `"backend-developer olarak bug'ları düzelt"` | `tasks/bugs/` okunur, BACKEND ticket'ları fix edilir |
 
 ### Bug Ticket Akışı
 
 1. QA → `tasks/bugs/BUG-XXX.md` yazar (format: `tasks/bugs/README.md`)
-2. Developer → ticket dosyasını okur, düzeltir, en başa `status: RESOLVED` yazar
-3. QA → sonraki audit'te RESOLVED ticketları `tasks/bugs/resolved/` klasörüne taşır
+2. Developer → ticket'ı okur, düzeltir, en başa `status: RESOLVED` yazar
+3. QA → sonraki audit'te RESOLVED ticket'ları `tasks/bugs/resolved/` taşır
 
 ---
 
 ## Feature Development Pipeline (Sıralı Rol Zinciri)
 
-Yeni bir özellik veya ekran geliştirirken roller **sırasıyla** devreye girer. Her rol bir öncekinin çıktısını temel alır.
+Yeni bir özellik geliştirirken roller **sırasıyla** devreye girer:
 
 ```
-Release Manager  → Analiz + Feature Spec yaz  → designs/specs/{feature}.md
+Release Manager  → TASK-XXX.md yazar       → tasks/open/
        ↓
-UX Designer      → Spec'i okuyup ekran tasarla → designs/screens/{feature}.md güncelle
+UX Designer      → Ekranı tasarlar          → designs/screens/{ekran}.md  (ux-required:true ise)
        ↓
-Backend Dev      → Schema + route değişiklikleri → prisma + routes
+n8n Engineer     → Workflow tasarlar        → n8n-workflows/{wf}.json     (n8n-required:true ise)
        ↓
-Frontend Dev     → Ekranı yeniden yaz / güncelle → pages/{Page}.tsx
+Backend Dev      → Schema + route yazar     → prisma + routes
+       ↓
+Frontend Dev     → Ekranı yazar/günceller   → pages/{Page}.tsx
        ↓
 QA Engineer      → Ekranı audit et → tasks/bugs/BUG-XXX.md yaz
 ```
@@ -56,18 +79,20 @@ QA Engineer      → Ekranı audit et → tasks/bugs/BUG-XXX.md yaz
 
 | Aşama | Tetikleyici komut | Ne olur |
 |---|---|---|
-| **1. RM** | `"release-manager olarak [konu] değerlendir"` | Spec dosyası `designs/specs/` altına yazılır, açık sorular + AC listesi üretilir |
-| **2. UX** | `"ux-designer olarak tasarımı yap"` | Spec okunur, ASCII wireframe + bileşen kararları `designs/screens/` altına yazılır |
-| **3. Backend** | `"backend-developer olarak geliştir"` | Prisma schema + routes güncellenir, `prisma db push` çalıştırılır |
-| **4. Frontend** | `"frontend-developer olarak geliştir"` | İlgili `pages/` dosyası tasarıma göre yeniden yazılır, TypeScript hataları sıfırlanır |
-| **5. QA** | `"qa-engineer olarak test et"` | Ekran audit edilir, bulunan buglar `tasks/bugs/BUG-XXX.md` olarak yazılır |
+| **1. RM** | `"release-manager olarak [konu] değerlendir"` | `tasks/open/TASK-XXX.md` oluşturulur: scope, ux-required, n8n-required, AC listesi |
+| **2. UX** | `"ux-designer olarak tasarımı yap"` | `tasks/open/` okunur, wireframe + bileşen kararları `designs/screens/{ekran}.md`'ye yazılır |
+| **3. n8n** | `"n8n-engineer olarak workflow yaz"` | `tasks/open/` okunur, workflow `n8n-workflows/` altına yazılır + publish edilir |
+| **4. Backend** | `"backend-developer olarak geliştir"` | `tasks/open/` okunur, Prisma schema + routes güncellenir |
+| **5. Frontend** | `"frontend-developer olarak geliştir"` | `tasks/open/` + `designs/screens/` okunur, `pages/` güncellenir |
+| **6. QA** | `"qa-engineer olarak test et"` | Ekran audit edilir, `tasks/bugs/BUG-XXX.md` yazılır |
 
 ### Önemli Kurallar
 
-- **RM spec olmadan UX başlamaz.** UX, `designs/specs/{feature}.md` dosyasını okuyarak işe başlar.
-- **UX wireframe olmadan Frontend başlamaz.** Frontend, `designs/screens/{feature}.md` tasarımını referans alır.
-- **Backend route ve schema olmadan Frontend API çağrısı yazmaz.** Backend önce biter.
-- **QA, Frontend merge olmadan ticket açmaz.** Gerçek implementasyonu test eder, spec'i değil.
+- **RM task olmadan hiçbir rol başlamaz.** Her iş `tasks/open/TASK-XXX.md` ile başlar.
+- **ux-required: true olmadan UX başlamaz.** UX, task dosyasını okuyarak işe başlar.
+- **UX wireframe olmadan Frontend ui yazmaz.** Frontend, `designs/screens/{ekran}.md` tasarımını referans alır.
+- **Backend route olmadan Frontend API çağrısı yazmaz.** Backend önce biter.
+- **QA, implementasyon tamamlanmadan ticket açmaz.** Gerçek kodu test eder.
 - Her rol kendi çıktısını ilgili dosyaya yazar — özetini kullanıcıya değil, dosyaya bırakır.
 
 ### Hangi Roller Atlanabilir?
@@ -190,7 +215,7 @@ Release Manager her faz geçişini onaylar. Bir sonraki faz **RM yeşil ışığ
 | `"release-manager olarak backend çıktısını review et"` | Handoff Notes okunur, frontend için hazırlık değerlendirilir |
 | `"release-manager olarak frontend çıktısını review et"` | AC'ler ekranda karşılanmış mı, edge case'ler var mı kontrol edilir |
 | `"release-manager olarak QA sonucunu review et"` | Bug severity dağılımı okunur, release'e yeşil ışık verilir ya da blocker listelenir |
-| `"release-manager olarak sprint durumunu değerlendir"` | `tasks/bugs/` + `tasks/todo.md` + `ROADMAP.md` okunur, önceliklendirme + engel analizi yapılır |
+| `"release-manager olarak sprint durumunu değerlendir"` | `tasks/open/` + `tasks/bugs/` + `ROADMAP.md` okunur, önceliklendirme + engel analizi yapılır |
 
 ### Handoff Notu Standardı
 
@@ -246,12 +271,11 @@ Format: Her skill dosyasında `## Handoff Notu — Zorunlu Çıktı` bölümünd
 
 ## Task Management
 
-1. **Plan First:** Planı `tasks/todo.md` dosyasına işaretlenebilir maddelerle yaz
+1. **Plan First:** Planı `tasks/open/TASK-XXX.md` veya manage_todo_list ile takip et
 2. **Verify Plan:** İmplementasyona başlamadan önce check et
 3. **Track Progress:** Maddeleri tamamlandıkça işaretle
 4. **Explain Changes:** Her adımda üst düzey özet ver
-5. **Document Results:** `tasks/todo.md`'ye review bölümü ekle
-6. **Capture Lessons:** Düzeltmelerden sonra `tasks/lessons.md`'yi güncelle
+5. **Capture Lessons:** Düzeltmelerden sonra `tasks/lessons.md`'yi güncelle
 
 ---
 
@@ -299,11 +323,17 @@ Format: Her skill dosyasında `## Handoff Notu — Zorunlu Çıktı` bölümünd
   copilot-instructions.md   ← bu dosya (otomatik yüklenir)
   copilot/skills/           ← rol bazlı skill dosyaları
 ROADMAP.md                  ← proje yol haritası
+docs/                       ← arşiv / referans dokümanlar
 tasks/
-  todo.md                   ← aktif görev listesi
+  README.md                 ← pipeline dokümantasyonu
   lessons.md                ← öğrenilen dersler
+  open/                     ← RM'nin açtığı görevler (TASK-XXX.md)
   bugs/                     ← QA bug ticketları (BUG-XXX.md)
   bugs/resolved/            ← kapanan ticketlar
+designs/
+  screens/                  ← UX ekran tasarımları
+  specs/                    ← büyük feature spec'leri
+n8n-workflows/              ← n8n workflow JSON dosyaları
 packages/
   frontend/                 ← React SPA
   backend/                  ← Express+TS API
