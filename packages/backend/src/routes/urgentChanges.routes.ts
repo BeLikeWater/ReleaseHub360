@@ -51,4 +51,13 @@ router.patch('/:id/status', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req,
   } catch (err) { next(err); }
 });
 
+router.delete('/:id', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req, res, next) => {
+  try {
+    const existing = await prisma.urgentChange.findUnique({ where: { id: String(req.params.id) } });
+    if (!existing) throw new AppError(404, 'Kayıt bulunamadı');
+    await prisma.urgentChange.delete({ where: { id: String(req.params.id) } });
+    res.status(204).send();
+  } catch (err) { next(err); }
+});
+
 export default router;

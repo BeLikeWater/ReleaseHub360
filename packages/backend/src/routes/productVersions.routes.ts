@@ -142,11 +142,162 @@ router.patch('/:id/release', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req
   }
 });
 
+// PATCH /api/product-versions/:id/advance-phase — durum makinesi: bir sonraki aşamaya ilerlet
+router.patch('/:id/advance-phase', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req, res, next) => {
+  try {
+    const version = await prisma.productVersion.findUnique({ where: { id: String(req.params.id) } });
+    if (!version) throw new AppError(404, 'Versiyon bulunamadı');
+    if (version.phase === 'ARCHIVED') throw new AppError(400, 'Arşivlenmiş versiyon ilerletilemez');
+
+    const currentIndex = PHASE_ORDER.indexOf(version.phase);
+    if (currentIndex === -1 || currentIndex >= PHASE_ORDER.length - 1) {
+      throw new AppError(400, 'Bu versiyon zaten son aşamada (PRODUCTION). Arşivlemek için /deprecate kullanın.');
+    }
+
+    const nextPhase = PHASE_ORDER[currentIndex + 1];
+    const updateData: Record<string, unknown> = { phase: nextPhase };
+    if (nextPhase === 'PRODUCTION') {
+      updateData.releaseDate = new Date();
+    }
+
+    const updated = await prisma.productVersion.update({
+      where: { id: String(req.params.id) },
+      data: updateData,
+    });
+    res.json({ data: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/product-versions/:id/phase — explicit phase set with transition validation
+router.patch('/:id/phase', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req, res, next) => {
+  try {
+    const { phase: newPhase } = z.object({ phase: z.enum(['PLANNED', 'DEVELOPMENT', 'RC', 'STAGING', 'PRODUCTION', 'ARCHIVED']) }).parse(req.body);
+    const version = await prisma.productVersion.findUnique({ where: { id: String(req.params.id) } });
+    if (!version) throw new AppError(404, 'Versiyon bulunamadı');
+
+    const currentIndex = PHASE_ORDER.indexOf(version.phase);
+    const nextIndex = PHASE_ORDER.indexOf(newPhase);
+    if (nextIndex < currentIndex) {
+      throw new AppError(400, `Geri geçiş yapılamaz: ${version.phase} → ${newPhase}`);
+    }
+
+    const updateData: Record<string, unknown> = { phase: newPhase };
+    if (newPhase === 'PRODUCTION' && !version.releaseDate) {
+      updateData.releaseDate = new Date();
+    }
+    if (newPhase === 'ARCHIVED') {
+      updateData.deprecatedAt = new Date();
+    }
+
+    const updated = await prisma.productVersion.update({
+      where: { id: String(req.params.id) },
+      data: updateData,
+    });
+    res.json({ data: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /api/product-versions/:id/deprecate — arşivle (müşteri kontrolü ile)
+router.patch('/:id/deprecate', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req, res, next) => {
+  try {
+    const versionId = String(req.params.id);
+    const force = req.query.force === 'true';
+
+    // Check for active customers on this version
+    const activeMappings = await prisma.customerProductMapping.findMany({
+      where: { productVersionId: versionId, isActive: true },
+      include: { customer: { select: { id: true, name: true } } },
+    });
+
+    if (activeMappings.length > 0 && !force) {
+      return res.status(409).json({
+        error: 'ACTIVE_CUSTOMERS',
+        message: `Bu versiyonda ${activeMappings.length} aktif müşteri var. Arşivlemek için force=true kullanın.`,
+        activeCustomers: activeMappings.map(m => ({
+          customerId: m.customer.id,
+          customerName: m.customer.name,
+        })),
+        count: activeMappings.length,
+      });
+    }
+
+    const updated = await prisma.productVersion.update({
+      where: { id: versionId },
+      data: { phase: 'ARCHIVED', deprecatedAt: new Date() },
+    });
+
+    // Notify affected customers
+    if (activeMappings.length > 0) {
+      const user = (req as unknown as { user: { id: string } }).user;
+      await Promise.all(
+        activeMappings.map(m =>
+          prisma.notification.create({
+            data: {
+              userId: user.id,
+              type: 'VERSION_DEPRECATED',
+              title: 'Versiyon Arşivlendi',
+              message: `${m.customer.name} müşterisinin kullandığı versiyon arşivlendi. Güncelleme planlanmalıdır.`,
+              linkUrl: `/customer-dashboard/${m.customer.id}`,
+            },
+          })
+        )
+      );
+    }
+
+    res.json({ data: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // DELETE /api/product-versions/:id
 router.delete('/:id', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req, res, next) => {
   try {
     await prisma.productVersion.delete({ where: { id: String(req.params.id) } });
     res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/product-versions/:id/health-score ─ server-side sağlık skoru hesaplama
+// Formül: 100 − (openPRs×3) − (incompleteP0Todos×5) − (breakingChanges×10)
+router.get('/:id/health-score', async (req, res, next) => {
+  try {
+    const version = await prisma.productVersion.findUnique({
+      where: { id: String(req.params.id) },
+      include: {
+        systemChanges: true,
+        releaseTodos: { where: { priority: 'P0', isCompleted: false } },
+      },
+    });
+    if (!version) throw new AppError(404, 'Versiyon bulunamadı');
+
+    const breakingChanges = version.systemChanges.filter((c) => c.isBreaking);
+    const incompleteP0Todos = version.releaseTodos;
+
+    // openPRs gelmiyor (TFS live data) — placeholder 0, frontend hâlâ kendi hesaplar
+    const score = Math.max(
+      0,
+      100 -
+        incompleteP0Todos.length * 5 -
+        breakingChanges.length * 10,
+    );
+
+    res.json({
+      data: {
+        score,
+        details: {
+          incompleteP0TodoCount: incompleteP0Todos.length,
+          breakingChangeCount: breakingChanges.length,
+          openPRCount: 0, // TFS live — hesap frontend'de
+        },
+      },
+    });
   } catch (err) {
     next(err);
   }

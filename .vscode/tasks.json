@@ -1,0 +1,21 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Start Backend (patched)",
+			"type": "shell",
+			"command": "cd packages/backend && npm run dev",
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Backend Dev Server",
+			"type": "shell",
+			"command": "cd packages/backend && npx tsx watch src/index.ts",
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}

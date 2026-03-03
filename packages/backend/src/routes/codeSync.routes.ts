@@ -235,7 +235,7 @@ router.post('/conflict-check', async (req, res, next) => {
 // Body: { serviceId, customerBranchId, sourceVersionId, targetVersionId, prIds, workitemSummary? }
 router.post('/start', async (req, res, next) => {
   try {
-    const { serviceId, customerBranchId, sourceVersionId, targetVersionId, prIds, workitemSummary } =
+    const { serviceId, customerBranchId, sourceVersionId, targetVersionId, prIds, workitemSummary, workitemCount } =
       z.object({
         serviceId: z.string().min(1),
         customerBranchId: z.string().min(1),
@@ -243,11 +243,13 @@ router.post('/start', async (req, res, next) => {
         targetVersionId: z.string().min(1),
         prIds: z.array(z.number()).min(1),
         workitemSummary: z.string().optional(),
+        workitemCount: z.number().optional(),
       }).parse(req.body);
 
-    const [creds, customerBranch, tgtVersion, svc] = await Promise.all([
+    const [creds, customerBranch, srcVersion, tgtVersion, svc] = await Promise.all([
       getProductCredsByService(serviceId),
       prisma.customerBranch.findUnique({ where: { id: customerBranchId } }),
+      prisma.productVersion.findUnique({ where: { id: sourceVersionId }, select: { version: true } }),
       prisma.productVersion.findUnique({ where: { id: targetVersionId } }),
       prisma.service.findUnique({ where: { id: serviceId } }),
     ]);
@@ -275,7 +277,7 @@ router.post('/start', async (req, res, next) => {
         status: 'RUNNING',
         syncBranchName: syncBranchPrefix,
         triggeredBy: userId,
-        payload: { serviceId, sourceVersionId, targetVersionId, prIds, repositoryName: repoName },
+        payload: { serviceId, sourceVersionId, targetVersionId, sourceVersionStr: srcVersion?.version, targetVersionStr: tgtVersion.version, prIds, repositoryName: repoName, workitemCount: workitemCount ?? null },
       },
     });
 
@@ -296,8 +298,8 @@ router.post('/start', async (req, res, next) => {
       where: { id: syncRecord.id },
       data: {
         payload: {
-          serviceId, sourceVersionId, targetVersionId, prIds, repositoryName: repoName,
-          mcpJobId: mcpResp.jobId,
+          serviceId, sourceVersionId, targetVersionId, sourceVersionStr: srcVersion?.version, targetVersionStr: tgtVersion.version, prIds, repositoryName: repoName,
+          mcpJobId: mcpResp.jobId, workitemCount: workitemCount ?? null,
         },
       },
     });

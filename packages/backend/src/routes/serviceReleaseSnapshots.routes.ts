@@ -3,6 +3,7 @@ import { z } from 'zod';
 import prisma from '../lib/prisma';
 import { authenticateJWT, requireRole } from '../middleware/auth.middleware';
 import { AppError } from '../middleware/errorHandler.middleware';
+import { decrypt } from '../lib/encryption';
 
 const router = Router();
 router.use(authenticateJWT);
@@ -20,12 +21,13 @@ function buildHeaders(pat: string) {
  *  releaseProject: Classic Release API için proje (azureReleaseProject || azureProject) */
 async function resolveProductCreds(productId: string): Promise<Creds | null> {
   const product = await prisma.product.findUnique({ where: { id: productId } });
-  if (product?.pmType === 'AZURE' && product.azureOrg && product.azureProject && product.azurePat) {
+  const isAzure = product?.pmType === 'AZURE' || product?.sourceControlType === 'AZURE';
+  if (product && isAzure && product.azureOrg && product.azureProject && product.azurePat) {
     return {
       org: product.azureOrg,
       project: product.azureProject,
       releaseProject: product.azureReleaseProject || product.azureProject,
-      pat: product.azurePat,
+      pat: decrypt(product.azurePat),
     };
   }
   return null;
@@ -65,11 +67,27 @@ async function fetchMergedPRsSince(
   }
 }
 
-// ─── GET /api/service-release-snapshots?productId=uuid ───────────────────────
-// Her servis için en son snapshot'ı döner (product bazlı)
+// ─── GET /api/service-release-snapshots ──────────────────────────────────────
+// ?productVersionId=uuid  → o versiyona ait tüm servis snapshot'larını döner (müşteri portalı için)
+// ?productId=uuid         → ürünün tüm servisleri için en son snapshot'ı döner (admin view)
 router.get('/', async (req, res, next) => {
   try {
-    const { productId } = req.query;
+    const { productId, productVersionId } = req.query;
+
+    // ── Mod 1: productVersionId filtresi (müşteri portalı — belirli versiyonun servisleri) ──
+    if (productVersionId) {
+      const snapshots = await prisma.serviceReleaseSnapshot.findMany({
+        where: { productVersionId: String(productVersionId) },
+        orderBy: { releasedAt: 'desc' },
+        include: {
+          service: { select: { id: true, name: true, description: true, dockerImageName: true } },
+        },
+      });
+      res.json({ data: snapshots });
+      return;
+    }
+
+    // ── Mod 2: productId filtresi (admin — her servis için en son snapshot) ──
     if (!productId) {
       res.json({ data: [] });
       return;
@@ -253,14 +271,14 @@ router.post(
         where: { id: body.productId },
         include: {
           services: {
-            select: { id: true, name: true, repoName: true, releaseName: true, releaseStage: true },
+            select: { id: true, name: true, repoName: true, releaseName: true, releaseStage: true, prodStageName: true },
           },
           moduleGroups: {
             include: {
               modules: {
                 include: {
                   services: {
-                    select: { id: true, name: true, repoName: true, releaseName: true, releaseStage: true },
+                    select: { id: true, name: true, repoName: true, releaseName: true, releaseStage: true, prodStageName: true },
                   },
                 },
               },
@@ -272,7 +290,7 @@ router.post(
 
       const allServices = new Map<
         string,
-        { id: string; name: string; repoName: string | null; releaseName: string | null; releaseStage: string | null }
+        { id: string; name: string; repoName: string | null; releaseName: string | null; releaseStage: string | null; prodStageName: string | null }
       >();
       product.services.forEach((s) => allServices.set(s.id, s));
       product.moduleGroups.forEach((g) =>
@@ -325,7 +343,8 @@ router.post(
                 { headers },
               ),
               // releaseStage tanımlıysa stage filtreli çağrı; değilse null
-              svc.releaseStage
+              // releaseStage deprecated → prodStageName'e fall-back
+              (svc.releaseStage ?? svc.prodStageName)
                 ? fetch(
                     `${base}/release/releases?definitionId=${matchedDef.id}&$expand=environments&$top=20&api-version=7.1`,
                     { headers },
@@ -349,8 +368,10 @@ router.post(
               const stageData = (await stageRes.json()) as { value?: Record<string, unknown>[] };
               for (const release of stageData.value ?? []) {
                 const envs = (release['environments'] as Record<string, unknown>[] | undefined) ?? [];
+                // releaseStage deprecated → prodStageName fall-back
+                const effectiveStage = svc.releaseStage ?? svc.prodStageName;
                 const targetEnv = envs.find(
-                  (e) => String(e['name']).toLowerCase() === svc.releaseStage!.toLowerCase(),
+                  (e) => String(e['name']).toLowerCase() === effectiveStage!.toLowerCase(),
                 );
                 if (targetEnv && String(targetEnv['status']).toLowerCase() === 'succeeded') {
                   // Release adını kullan (artifact build no değil)

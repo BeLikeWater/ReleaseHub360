@@ -93,6 +93,32 @@ Bu dosya her düzeltmeden sonra güncellenir. Copilot her oturum başında buray
 
 ---
 
+## 2026-03-02
+
+### L008 — Tasarım dokümanı yazıldı ≠ ekranda uygulandı → her faz sonunda RM gap review zorunlu
+**Durum:** 5.792 satırlık DESIGN_DOCUMENT + 22 ekran tasarımı yazıldı. Uygulamaya geçildi.
+**Sorun:** Frontend sayfaları temel CRUD'u implement etti ama aksiyon katmanını (download, approve, request butonları, DORA metrikleri, 3-view toggle, export vb.) tamamen atladı. 36 gap tespit edildi.
+**Çözüm:** `tasks/GAP-ANALYSIS.md` oluşturuldu; P0-P3 önceliklendirme + 5 fazlı aksiyon planı yazıldı.
+**Kural:** Her fazın sonunda (Backend→Frontend→QA geçişlerinde) RM skill ile **zorunlu gap review** yap. `designs/screens/{ekran}.md` AC listesini satır satır mevcut kodla karşılaştır. "Çalışıyor" ≠ "tasarıma uygun". Özellikle conditional rendering (deploymentModel bazlı buton gösterimi gibi) ve action layer (download/approve/request) mutlaka kontrol edilmeli.
+
+---
+
+### L011 — \"Backend endpoint mevcut\" notu ≠ frontend'de çağrılıyor
+**Durum:** TASK-005/006 geliştirmesinde `ServiceReleaseSnapshot` ve `VersionPackage` backendleri hazırdı. RM spec'te \"backend endpoint mevcut\" notu vardı.
+**Sorun:** Frontend developer bu notu \"yapıldı\" olarak yorumladı. Endpoint TSX'de hiç `useQuery` ile çağrılmadı. Kullanıcı müşteri portalında servisleri ve paketleri göremedi.
+**Çözüm:** Her AC için implementasyon sonunda `grep -n 'endpoint-path' Pages/{Page}.tsx` çalıştır. Satır çıkmıyorsa AC tamamlanmış sayılmaz.
+**Kural:** \"Endpoint mevcut\" notunu gördüğünde ilk yaptığın iş: o endpoint'in TSX içinde `useQuery` veya `useMutation` ile gerçekten çağrıldığını doğrula. Belgelenmesi ≠ kullanılması.
+
+---
+
+### L012 — Tarih input'u YYYY-MM-DD → backend z.string().datetime() → 422 (sessiz)
+**Durum:** `ReleasesPage.tsx` NewVersionDialog ve `CustomerProductVersionsPage.tsx` TransitionPlanDialog, `<input type=\"date\">` çıktısını doğrudan backend'e gönderdi.
+**Sorun:** Backend Zod schema'sı `z.string().datetime()` bekliyor — bu tam ISO 8601 formatı ister (`2026-03-03T00:00:00.000Z`). YYYY-MM-DD gelince 422 fırlatır. Frontend'de hata gösterilmediğinden \"kayıt olmuyor\" gibi görünür.
+**Çözüm:** `new Date(dateStr).toISOString()` ile dönüştür. Mutation'da: `plannedDate: dates[key].planned ? new Date(dates[key].planned).toISOString() : null`.
+**Kural:** Backend'e tarih gönderen her mutation'da: `<input type=\"date\">` çıktısı `.toISOString()` olmadan gitmemeli. Bu pattern'i görmeden önce bile `mutation payload`da tarih alanı var mı diye kontrol et.
+
+---
+
 ## Azure DevOps WIT API
 
 ### L010 — Azure Work Items API — Double && ve Proje-Scope Hatası

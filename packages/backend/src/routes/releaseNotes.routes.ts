@@ -3,6 +3,7 @@ import { z } from 'zod';
 import prisma from '../lib/prisma';
 import { authenticateJWT } from '../middleware/auth.middleware';
 import { AppError } from '../middleware/errorHandler.middleware';
+import { decrypt } from '../lib/encryption';
 
 // Helper: workitemId alanına sahip release note'ların ID kümesini döner (sayı olarak)
 async function coveredWorkItemIds(productVersionId: string): Promise<Set<number>> {
@@ -111,7 +112,7 @@ router.post('/trigger-generation', async (req, res, next) => {
       missingWorkItemIds:  missingIds,
       azureOrg:            product.azureOrg,
       azureProject:        product.azureProject,
-      azurePat:            product.azurePat,
+      azurePat:            product.azurePat ? decrypt(product.azurePat) : undefined,
       mcpServerUrl:        process.env.MCP_SERVER_URL  ?? 'http://localhost:8000',
       backendUrl:          process.env.BACKEND_URL     ?? 'http://localhost:3001',
       token,
@@ -132,6 +133,47 @@ router.post('/trigger-generation', async (req, res, next) => {
         message:      `${missingIds.length} work item için release note üretimi başlatıldı. Birkaç dakika sonra sayfayı yenileyin.`,
       },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/release-notes/by-version/:versionId
+// Customer-accessible endpoint — verifies CPM access for CUSTOMER role
+router.get('/by-version/:versionId', async (req, res, next) => {
+  try {
+    const user = req.user!;
+    const versionId = String(req.params.versionId);
+
+    const version = await prisma.productVersion.findUnique({
+      where: { id: versionId },
+      select: { id: true, version: true, productId: true },
+    });
+    if (!version) throw new AppError(404, 'Versiyon bulunamadı');
+
+    // For CUSTOMER users: verify they have CPM access to this product
+    if (user.userType === 'CUSTOMER') {
+      if (!user.customerId) throw new AppError(403, 'Müşteri bağlantısı bulunamadı');
+      const cpm = await prisma.customerProductMapping.findFirst({
+        where: {
+          customerId: user.customerId,
+          isActive: true,
+          OR: [
+            // New CPMs: productId set directly
+            { productId: version.productId },
+            // Legacy CPMs: productId is null, check via productVersion's product
+            { productVersion: { productId: version.productId } },
+          ],
+        },
+      });
+      if (!cpm) throw new AppError(403, 'Bu versiyona erişim yetkiniz yok');
+    }
+
+    const notes = await prisma.releaseNote.findMany({
+      where: { productVersionId: versionId },
+      orderBy: [{ category: 'asc' }, { sortOrder: 'asc' }],
+    });
+    res.json({ data: notes, version: { id: version.id, version: version.version } });
   } catch (err) {
     next(err);
   }

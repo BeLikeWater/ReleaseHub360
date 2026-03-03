@@ -84,14 +84,24 @@ class StructuredReleaseNoteGenerator:
                 messages=[
                     {
                         "role": "system", 
-                        "content": """You are a senior software architect analyzing code changes for release notes. 
-Your task is to:
-1. Identify method-level changes (added, deleted, updated methods with their parameters)
-2. Identify class-level changes (added, deleted, updated classes with their properties)
-3. Mark deletions as breaking changes
-4. Generate concise technical and business titles and descriptions
+                        "content": """You are a senior software architect performing structured diff analysis on code changes.
 
-Be precise and focus on WHAT changed, not HOW it was implemented."""
+For EACH changed file, determine its type and extract ONLY structural changes — not narrative descriptions:
+
+1. UI FILE (.tsx, .jsx, .vue, .svelte, frontend component/page/form files):
+   → Extract added/deleted/updated FIELDS (form inputs, table columns, display fields)
+   → For each field: name, type (text/number/date/select/checkbox/…), label, required, and any other visible properties
+
+2. API FILE (.routes.ts, .controller.ts, .py route/endpoint files, Express/FastAPI/NestJS handlers):
+   → Extract added/deleted/updated ENDPOINTS
+   → For each endpoint: HTTP method, path, request model fields, response model fields
+   → For updated endpoints: show what changed in request/response models specifically
+
+3. TABLE/ENTITY FILE (.prisma, migration SQL, *.entity.ts, *.model.ts, schema files):
+   → Extract added/deleted/updated COLUMNS
+   → For each column: table name, column name, data type, nullable, default value, unique
+
+Produce ONLY the JSON. No narrative text. No explanations outside JSON."""
                     },
                     {"role": "user", "content": prompt}
                 ],
@@ -114,7 +124,7 @@ Be precise and focus on WHAT changed, not HOW it was implemented."""
         diffs: List[Dict[str, str]],
         language: str = "en"
     ) -> str:
-        """Build comprehensive analysis prompt"""
+        """Build structured diff analysis prompt — UI / API / Table separation"""
         
         lang_instruction = ""
         if language == "tr":
@@ -126,11 +136,11 @@ Be precise and focus on WHAT changed, not HOW it was implemented."""
         ])
         
         diff_summary = "\n\n".join([
-            f"File: {d['file']}\n```\n{d['diff']}\n```"
+            f"### File: {d['file']}\n```\n{d['diff']}\n```"
             for d in diffs
         ])
         
-        return f"""Analyze these code changes and generate a structured release note.{lang_instruction}
+        return f"""Analyze the code diffs below and produce a structured change report.{lang_instruction}
 
 **Work Item**: {pbi.title}
 **Type**: {pbi.work_item_type}
@@ -138,87 +148,140 @@ Be precise and focus on WHAT changed, not HOW it was implemented."""
 **Pull Requests**:
 {pr_summary}
 
-**Code Changes**:
+**Code Changes** (file diffs):
 {diff_summary}
 
-Return ONLY a JSON object with this EXACT structure (no additional text):
+---
+
+File type classification rules (apply to every diff above):
+- UI file: extension is .tsx / .jsx / .vue / .svelte, OR path contains /pages/ /components/ /screens/ /views/
+- API file: extension is .routes.ts / .controller.ts / .py, OR path contains /routes/ /controllers/ /endpoints/
+- TABLE file: extension is .prisma / .sql, OR filename contains entity / model / schema (e.g. *.entity.ts)
+
+Return ONLY the following JSON. Use empty arrays [] where nothing changed. No text outside JSON.
 
 {{
   "releaseNote": {{
     "technical": {{
       "title": "Brief technical title (5-10 words)",
-      "description": "Technical description focusing on implementation details, architecture, and code changes (2-3 sentences)"
+      "description": "Technical description: which layers changed, what was restructured (2-3 sentences)"
     }},
     "business": {{
       "title": "Brief business-focused title (5-10 words)",
-      "description": "Business description focusing on user impact, features, and value (2-3 sentences)"
+      "description": "Business impact: what users/operators can now do differently (2-3 sentences)"
     }}
   }},
   "changes": {{
-    "methods": {{
+    "ui": {{
       "added": [
         {{
-          "name": "methodName",
-          "class_name": "ClassName",
-          "parameters": ["param1: Type", "param2: Type"],
-          "description": "Brief description"
+          "file": "relative/path/to/File.tsx",
+          "field": "fieldName",
+          "type": "text | number | date | select | checkbox | table-column | display | …",
+          "label": "Visible label text",
+          "required": true,
+          "properties": {{"placeholder": "…", "options": ["…"]}}
         }}
       ],
       "deleted": [
         {{
-          "name": "methodName",
-          "class_name": "ClassName",
-          "parameters": ["param1: Type"],
-          "description": "Brief description"
+          "file": "relative/path/to/File.tsx",
+          "field": "fieldName",
+          "type": "text",
+          "label": "Label"
         }}
       ],
       "updated": [
         {{
-          "name": "methodName",
-          "class_name": "ClassName",
-          "parameters": ["newParam: Type"],
-          "description": "What was updated"
+          "file": "relative/path/to/File.tsx",
+          "field": "fieldName",
+          "changes": {{"type": "text→select", "label": "Old Label→New Label", "required": "false→true"}}
         }}
       ]
     }},
-    "classes": {{
+    "api": {{
       "added": [
         {{
-          "name": "ClassName",
-          "properties": ["property1: Type", "property2: Type"],
-          "description": "Brief description"
+          "file": "relative/path/to/file.routes.ts",
+          "httpMethod": "POST",
+          "path": "/api/resource",
+          "requestModel": {{"field1": "string", "field2": "number?"}},
+          "responseModel": {{"id": "string", "createdAt": "Date"}}
         }}
       ],
       "deleted": [
         {{
-          "name": "ClassName",
-          "properties": ["property1: Type"],
-          "description": "Brief description"
+          "file": "relative/path/to/file.routes.ts",
+          "httpMethod": "DELETE",
+          "path": "/api/resource/:id",
+          "requestModel": {{}},
+          "responseModel": {{}}
         }}
       ],
       "updated": [
         {{
-          "name": "ClassName",
-          "properties": ["addedProperty: Type"],
-          "description": "What changed"
+          "file": "relative/path/to/file.routes.ts",
+          "httpMethod": "GET",
+          "path": "/api/resource",
+          "requestModelChanges": {{"added": {{"status": "string?"}}, "removed": {{"legacyField": "string"}}}},
+          "responseModelChanges": {{"added": {{"count": "number"}}, "removed": {{}}}}
+        }}
+      ]
+    }},
+    "table": {{
+      "added": [
+        {{
+          "file": "relative/path/to/schema.prisma",
+          "table": "table_name",
+          "column": "column_name",
+          "dataType": "String",
+          "nullable": true,
+          "default": null,
+          "unique": false
+        }}
+      ],
+      "deleted": [
+        {{
+          "file": "relative/path/to/schema.prisma",
+          "table": "table_name",
+          "column": "column_name",
+          "dataType": "String"
+        }}
+      ],
+      "updated": [
+        {{
+          "file": "relative/path/to/schema.prisma",
+          "table": "table_name",
+          "column": "column_name",
+          "changes": {{"dataType": "String→Text", "nullable": "false→true"}}
         }}
       ]
     }}
   }}
 }}
 
-Important:
-- If no methods/classes changed in a category, use empty array []
-- Deletions are automatically breaking changes
-- Focus on public APIs and significant changes
-- Be concise and precise
-- Parameter updates should show NEW parameter list
-- Property updates should show ADDED/MODIFIED properties only"""
+Rules:
+- Extract only structurally observable changes from the diff (added/removed lines).
+- For UI: a "field" is any <input>, <Select>, <TextField>, <DatePicker>, table column header, or form control.
+- For API: only include endpoints that have a route handler (router.get/post/put/delete or @Get/@Post etc.).
+- For TABLE: read Prisma model fields or SQL ALTER TABLE / CREATE TABLE statements directly.
+- Do NOT invent fields. If a diff is for a file type that doesn't match any category, skip it.
+- For updated items, only describe what CHANGED between old and new lines — not the whole structure.
+- Deletions in api/table are automatically breaking changes."""
 
     def _format_output(self, llm_result: Dict[str, Any]) -> Dict[str, Any]:
-        """Format LLM output to match expected structure"""
+        """Format LLM output: ui / api / table structured changes"""
         
-        # Ensure proper structure
+        def _pt(items: Any) -> list:
+            """Pass through list, default to []"""
+            return items if isinstance(items, list) else []
+        
+        raw_changes = llm_result.get("changes", {})
+        
+        ui_changes = raw_changes.get("ui", {})
+        api_changes = raw_changes.get("api", {})
+        table_changes = raw_changes.get("table", {})
+        
         output = {
             "releaseNote": {
                 "technical": {
@@ -231,31 +294,33 @@ Important:
                 }
             },
             "changes": {
-                "methods": {
-                    "added": llm_result.get("changes", {}).get("methods", {}).get("added", []),
-                    "deleted": llm_result.get("changes", {}).get("methods", {}).get("deleted", []),
-                    "updated": llm_result.get("changes", {}).get("methods", {}).get("updated", [])
+                "ui": {
+                    "added":   _pt(ui_changes.get("added", [])),
+                    "deleted": _pt(ui_changes.get("deleted", [])),
+                    "updated": _pt(ui_changes.get("updated", []))
                 },
-                "classes": {
-                    "added": llm_result.get("changes", {}).get("classes", {}).get("added", []),
-                    "deleted": llm_result.get("changes", {}).get("classes", {}).get("deleted", []),
-                    "updated": llm_result.get("changes", {}).get("classes", {}).get("updated", [])
+                "api": {
+                    "added":   _pt(api_changes.get("added", [])),
+                    "deleted": _pt(api_changes.get("deleted", [])),
+                    "updated": _pt(api_changes.get("updated", []))
+                },
+                "table": {
+                    "added":   _pt(table_changes.get("added", [])),
+                    "deleted": _pt(table_changes.get("deleted", [])),
+                    "updated": _pt(table_changes.get("updated", []))
                 }
             }
         }
         
-        # Add breaking changes flag if there are deletions
-        has_breaking_changes = (
-            len(output["changes"]["methods"]["deleted"]) > 0 or
-            len(output["changes"]["classes"]["deleted"]) > 0
+        # Breaking changes = deleted api endpoints OR deleted table columns
+        breaking_items = (
+            output["changes"]["api"]["deleted"] +
+            output["changes"]["table"]["deleted"]
         )
         
-        if has_breaking_changes:
+        if breaking_items:
             output["breakingChanges"] = True
-            output["breakingChangesList"] = (
-                output["changes"]["methods"]["deleted"] + 
-                output["changes"]["classes"]["deleted"]
-            )
+            output["breakingChangesList"] = breaking_items
         
         return output
 
@@ -280,8 +345,9 @@ Important:
                     }
                 },
                 "changes": {
-                    "methods": {"added": [], "deleted": [], "updated": []},
-                    "classes": {"added": [], "deleted": [], "updated": []}
+                    "ui":    {"added": [], "deleted": [], "updated": []},
+                    "api":   {"added": [], "deleted": [], "updated": []},
+                    "table": {"added": [], "deleted": [], "updated": []}
                 },
                 "note": "Detaylı kod analizi için OPENAI_API_KEY veya AZURE_OPENAI_ENDPOINT yapılandırın"
             }
@@ -298,16 +364,9 @@ Important:
                 }
             },
             "changes": {
-                "methods": {
-                    "added": [],
-                    "deleted": [],
-                    "updated": []
-                },
-                "classes": {
-                    "added": [],
-                    "deleted": [],
-                    "updated": []
-                }
+                "ui":    {"added": [], "deleted": [], "updated": []},
+                "api":   {"added": [], "deleted": [], "updated": []},
+                "table": {"added": [], "deleted": [], "updated": []}
             },
             "note": "Configure OPENAI_API_KEY or AZURE_OPENAI_ENDPOINT for detailed code analysis"
         }

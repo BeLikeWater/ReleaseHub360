@@ -55,7 +55,43 @@ const { data, isLoading, isError } = useQuery({  // ✅
   queryKey: ['key'],
   queryFn: () => apiClient.get('/endpoint').then(r => r.data.data),
 });
+
+// Tarih input'ları her zaman ISO'ya dönüştür (kritik — backend z.string().datetime() bekler)
+// <input type="date"> → YYYY-MM-DD döner → backend 422 fırlatır
+const isoDate = dateStr ? new Date(dateStr).toISOString() : null;  // ✅
+// const dateOnly = dateStr;  // ❌ yanlış — Zod datetime validation hatası
 ```
+
+---
+
+## Feature Mode — AC Tamamlama Protokolü
+
+Bir AC'yi "tamamlandı" saymadan önce aşağıdaki listeyi geç:
+
+```
+1. TSX'te useQuery ile endpoint gerçekten çağrıldı mı?
+   grep -n 'api.get\|useQuery' pages/{PageName}.tsx  → satır numarası görmeli
+
+2. Her sub-bileşen kendi verisini çekiyor mu, yoksa prop drilling mi?
+   Lazy-loaded bileşenler için: enabled: !!someId pattern kullan
+
+3. CRUD mutation'larının hepsinde onSuccess + invalidateQueries var mı?
+   Mutation tutarlı query key kullanıyor mu?
+
+4. Tarih gönderen her mutationFn ISO dönüşümü yapıyor mu?
+   `new Date(dateStr).toISOString()` kullanıldığından emin ol
+
+5. Loading + error state'leri görsel olarak handle ediliyor mu?
+   Sadece `if (isLoading) return null` değil — CircularProgress + Alert göster
+```
+
+### "Backend endpoint mevcut" notuna dikkat
+
+**Task'ta veya design doc'ta "backend endpoint mevcut" yazıyorsa** bu şu anlama gelir:
+- O endpoint'in TSX içinde `useQuery` ile çağrılması **gerekiyor** — sadece belgelenmesi değil
+- "mevcut" ≠ "ekranda görünüyor"
+- Implementasyon sonunda `grep -n 'endpoint-path' pages/{Page}.tsx` ile varlığını doğrula
+- Endpoint çağrısı yoksa → AC eksik → tamamlandı sayılmaz
 
 ---
 

@@ -36,7 +36,7 @@ router.post('/login', async (req, res, next) => {
       throw new AppError(401, 'E-posta veya şifre hatalı');
     }
 
-    const payload: JwtPayload = { userId: user.id, email: user.email, role: user.role, name: user.name };
+    const payload: JwtPayload = { userId: user.id, email: user.email, role: user.role, name: user.name, userType: 'ORG' };
     const tokens = generateTokens(payload);
 
     res.json({
@@ -61,7 +61,7 @@ router.post('/refresh', async (req, res, next) => {
       throw new AppError(401, 'Geçersiz token');
     }
 
-    const newPayload: JwtPayload = { userId: user.id, email: user.email, role: user.role, name: user.name };
+    const newPayload: JwtPayload = { userId: user.id, email: user.email, role: user.role, name: user.name, userType: 'ORG' };
     const { accessToken } = generateTokens(newPayload);
     res.json({ data: { accessToken } });
   } catch (err) {
@@ -72,12 +72,74 @@ router.post('/refresh', async (req, res, next) => {
 // GET /api/auth/me
 router.get('/me', authenticateJWT, async (req, res, next) => {
   try {
+    const { userType, userId, customerId } = req.user!;
+
+    if (userType === 'CUSTOMER') {
+      const cu = await prisma.customerUser.findUnique({
+        where: { id: userId },
+        select: { id: true, email: true, name: true, role: true, customerId: true, isActive: true },
+      });
+      if (!cu) throw new AppError(404, 'Kullanıcı bulunamadı');
+      res.json({ data: { ...cu, userType: 'CUSTOMER', customerId: customerId ?? cu.customerId } });
+      return;
+    }
+
     const user = await prisma.user.findUnique({
-      where: { id: req.user!.userId },
+      where: { id: userId },
       select: { id: true, email: true, name: true, role: true, createdAt: true },
     });
     if (!user) throw new AppError(404, 'Kullanıcı bulunamadı');
-    res.json({ data: user });
+    res.json({ data: { ...user, userType: 'ORG' } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/auth/customer-login
+router.post('/customer-login', async (req, res, next) => {
+  try {
+    const { email, password } = loginSchema.parse(req.body);
+    const customerUser = await prisma.customerUser.findFirst({
+      where: { email, isActive: true },
+      include: { customer: { select: { id: true, name: true, code: true } } },
+    });
+
+    if (!customerUser) throw new AppError(401, 'E-posta veya şifre hatalı');
+    if (!customerUser.passwordHash) throw new AppError(401, 'Şifre tanımlı değil, sistem yöneticisiyle iletişime geçin');
+
+    const isMatch = await bcrypt.compare(password, customerUser.passwordHash);
+    if (!isMatch) throw new AppError(401, 'E-posta veya şifre hatalı');
+
+    const payload: JwtPayload = {
+      userId: customerUser.id,
+      email: customerUser.email,
+      role: customerUser.role,
+      name: customerUser.name,
+      userType: 'CUSTOMER',
+      customerId: customerUser.customerId,
+    };
+    const tokens = generateTokens(payload);
+
+    // Update lastLoginAt
+    await prisma.customerUser.update({
+      where: { id: customerUser.id },
+      data: { lastLoginAt: new Date() },
+    });
+
+    res.json({
+      data: {
+        ...tokens,
+        user: {
+          id: customerUser.id,
+          email: customerUser.email,
+          name: customerUser.name,
+          role: customerUser.role,
+          userType: 'CUSTOMER',
+          customerId: customerUser.customerId,
+          customerName: customerUser.customer.name,
+        },
+      },
+    });
   } catch (err) {
     next(err);
   }

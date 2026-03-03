@@ -79,7 +79,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Her work item ID i\\u00e7in ayr\\u0131 bir n8n item \\u00fcret (paralel i\\u015fleme)\nconst payload = $json[\"body\"];\n\nif (!payload.missingWorkItemIds || payload.missingWorkItemIds.length === 0) {\n  return [];\n}\n\npayload.missingWorkItemIds = payload.missingWorkItemIds.slice(26);\n\nreturn payload.missingWorkItemIds.map(workItemId => ({\n  json: {\n    workItemId: Number(workItemId),\n    versionId:    payload.versionId,\n    azureOrg:     payload.azureOrg,\n    azureProject: payload.azureProject,\n    azurePat:     payload.azurePat,\n    mcpServerUrl: payload.mcpServerUrl,\n    backendUrl:   payload.backendUrl,\n    token:        payload.token,\n  }\n}));"
+        "jsCode": "// Her work item ID i\\u00e7in ayr\\u0131 bir n8n item \\u00fcret (paralel i\\u015fleme)\nconst payload = $json[\"body\"];\n\nif (!payload.missingWorkItemIds || payload.missingWorkItemIds.length === 0) {\n  return [];\n}\n\nreturn payload.missingWorkItemIds.map(workItemId => ({\n  json: {\n    workItemId: Number(workItemId),\n    versionId:    payload.versionId,\n    azureOrg:     payload.azureOrg,\n    azureProject: payload.azureProject,\n    azurePat:     payload.azurePat,\n    mcpServerUrl: payload.mcpServerUrl,\n    backendUrl:   payload.backendUrl,\n    token:        payload.token,\n  }\n}));"
       },
       "id": "9613b38b-8e7c-411f-81ed-854e8ad2c3e2",
       "name": "DataPreparation",
@@ -149,7 +149,8 @@
     },
     {
       "parameters": {
-        "jsCode": "// MCP yan\\u0131t\\u0131n\\u0131 release note DB format\\u0131na d\\u00f6n\\u00fc\\u015ft\\u00fcr\nconst mcpResp  = $input.item.json;\nconst ctx      = $node[\"DataPreparation\"].json;\n\n// MCP hata d\\u00f6nd\\u00fc veya bo\\u015f geldi\nif (!mcpResp || mcpResp.error || mcpResp.statusCode >= 400) {\n  console.log('MCP hata d\\u00f6nd\\u00fc, work item atlan\\u0131yor:', ctx.workItemId, mcpResp);\n  return [];  // Bu item'\\u0131 atla\n}\n\nconst rn = mcpResp.release_notes?.releaseNote ?? {};\nconst techTitle    = (rn.technical?.title    ?? '').trim();\nconst businessTitle = (rn.business?.title   ?? '').trim() || `Work Item #${ctx.workItemId}`;\nconst businessDesc  = (rn.business?.description  ?? '').trim();\nconst technicalDesc = (rn.technical?.description ?? '').trim();\n\nlet category = 'FEATURE';\n\nconst parts = [];\nif (businessDesc)  parts.push(businessDesc);\nif (technicalDesc && technicalDesc !== businessDesc) {\n  parts.push('---');\n  parts.push(technicalDesc);\n}\nconst description = parts.join('\\n\\n') || null;\n\nreturn [{\n  json: {\n    productVersionId: ctx.versionId,\n    workitemId:       String(ctx.workItemId),\n    category,\n    title:            businessTitle,\n    description,\n    isBreaking:       category === 'BREAKING',\n    // Kaydetme i\\u00e7in meta — geri\\u015f HTTP iste\\u011finden \\u00e7\\u0131kar\\u0131l\\u0131r\n    _backendUrl:      ctx.backendUrl,\n    _token:           ctx.token,\n  }\n}];"
+        "jsCode": "// MCP yanıtını release note DB formatına dönüştür (runOnceForAllItems)\nconst mcpItems  = $input.all();\nconst dataItems = $('DataPreparation').all();\n\nconst results = [];\n\nfor (let i = 0; i < mcpItems.length; i++) {\n  const mcpResp = mcpItems[i].json;\n  const ctx     = dataItems[i] ? dataItems[i].json : {};\n\n  // MCP hata döndü veya boş geldi — bu item'ı atla\n  const hasError = !mcpResp\n    || mcpResp.error\n    || mcpResp.detail\n    || (mcpResp.statusCode && mcpResp.statusCode >= 400)\n    || !mcpResp.release_notes;\n\n  if (hasError) {\n    console.log('MCP hata döndü, work item atlanıyor:', ctx.workItemId, JSON.stringify(mcpResp).slice(0, 300));\n    continue;\n  }\n\n  const rn = mcpResp.release_notes?.releaseNote ?? {};\n  const businessTitle = (rn.business?.title   ?? '').trim() || ('Work Item #' + ctx.workItemId);\n  const businessDesc  = (rn.business?.description  ?? '').trim();\n  const technicalDesc = (rn.technical?.description ?? '').trim();\n\n  const category = 'FEATURE';\n\n  const parts = [];\n  if (businessDesc)  parts.push(businessDesc);\n  if (technicalDesc && technicalDesc !== businessDesc) {\n    parts.push('---');\n    parts.push(technicalDesc);\n  }\n  const description = parts.join('\\n\\n') || null;\n\n  results.push({\n    json: {\n      productVersionId: ctx.versionId,\n      workitemId:       String(ctx.workItemId),\n      category,\n      title:            businessTitle,\n      description,\n      isBreaking:       false,\n      _backendUrl:      ctx.backendUrl,\n      _token:           ctx.token,\n    }\n  });\n}\n\nreturn results;",
+        "mode": "runOnceForAllItems"
       },
       "id": "0f42bac5-7064-46a9-bd2d-957b2f358cf4",
       "name": "SaveModel",
@@ -159,6 +160,55 @@
         720,
         0
       ]
+    },
+    {
+      "id": "13472fcc-b826-4f29-ad5d-4a47ecad7723",
+      "name": "SaveChanges",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// MCP 'changes' verisini SystemChange kayıtlarına dönüştür\n// UI / API / TABLE kategorileri için ayrı ayrı işler\nconst mcpItems  = $('GenerateReleaseNoteMCP').all();\nconst dataItems = $('DataPreparation').all();\n\nconst typeMap = {\n  deleted: 'BREAKING',\n  added:   'FEATURE',\n  updated: 'FEATURE',\n};\n\nconst allChanges = [];\n\nfor (let i = 0; i < mcpItems.length; i++) {\n  const mcpResp = mcpItems[i].json;\n  const ctx     = dataItems[i] ? dataItems[i].json : {};\n\n  if (!mcpResp || mcpResp.error || mcpResp.detail || !mcpResp.release_notes) {\n    continue;\n  }\n\n  const changes    = mcpResp.release_notes.changes;\n  if (!changes) continue;\n\n  const versionId  = ctx.versionId;\n  const workitemId = String(ctx.workItemId);\n\n  // ── UI changes ──────────────────────────────────────────────\n  for (const [operation, fields] of Object.entries(changes.ui || {})) {\n    for (const f of (fields || [])) {\n      const detail = `field: ${f.field}, type: ${f.type || ''}, label: ${f.label || ''}`;\n      allChanges.push({\n        productVersionId: versionId,\n        workitemId,\n        source:        'MCP',\n        changeType:    typeMap[operation] || 'FEATURE',\n        isBreaking:    operation === 'deleted',\n        title:         `[UI] ${operation}: ${f.field}${f.label ? ' (' + f.label + ')' : ''}`,\n        description:   detail,\n        apiPath:       null,\n        previousValue: operation === 'deleted' ? detail : (operation === 'updated' ? JSON.stringify(f.changes) : null),\n        newValue:      operation === 'added'   ? detail : (operation === 'updated' ? JSON.stringify(f.changes) : null),\n      });\n    }\n  }\n\n  // ── API changes ──────────────────────────────────────────────\n  for (const [operation, endpoints] of Object.entries(changes.api || {})) {\n    for (const e of (endpoints || [])) {\n      const endpointLabel = `${e.httpMethod} ${e.path}`;\n      let description = endpointLabel;\n      let previousValue = null;\n      let newValue      = null;\n\n      if (operation === 'added') {\n        description = `Request: ${JSON.stringify(e.requestModel || {})}, Response: ${JSON.stringify(e.responseModel || {})}`;\n        newValue    = description;\n      } else if (operation === 'deleted') {\n        description   = `Request: ${JSON.stringify(e.requestModel || {})}, Response: ${JSON.stringify(e.responseModel || {})}`;\n        previousValue = description;\n      } else if (operation === 'updated') {\n        const reqChg = e.requestModelChanges  ? JSON.stringify(e.requestModelChanges)  : null;\n        const resChg = e.responseModelChanges ? JSON.stringify(e.responseModelChanges) : null;\n        description   = [reqChg && `RequestChanges: ${reqChg}`, resChg && `ResponseChanges: ${resChg}`].filter(Boolean).join(' | ');\n        previousValue = reqChg;\n        newValue      = resChg;\n      }\n\n      allChanges.push({\n        productVersionId: versionId,\n        workitemId,\n        source:        'MCP',\n        changeType:    typeMap[operation] || 'FEATURE',\n        isBreaking:    operation === 'deleted',\n        title:         `[API] ${operation}: ${endpointLabel}`,\n        description:   description || null,\n        apiPath:       endpointLabel,\n        previousValue,\n        newValue,\n      });\n    }\n  }\n\n  // ── TABLE changes ────────────────────────────────────────────\n  for (const [operation, columns] of Object.entries(changes.table || {})) {\n    for (const c of (columns || [])) {\n      const columnLabel = `${c.table}.${c.column}`;\n      let description   = `table: ${c.table}, column: ${c.column}, type: ${c.dataType || ''}`;\n      let previousValue = null;\n      let newValue      = null;\n\n      if (operation === 'added') {\n        description += `, nullable: ${c.nullable ?? true}, default: ${c.default ?? 'null'}`;\n        newValue    = description;\n      } else if (operation === 'deleted') {\n        previousValue = description;\n      } else if (operation === 'updated') {\n        description   = `Changes: ${JSON.stringify(c.changes || {})}`;\n        previousValue = JSON.stringify(c.changes || {});\n        newValue      = JSON.stringify(c.changes || {});\n      }\n\n      allChanges.push({\n        productVersionId: versionId,\n        workitemId,\n        source:        'MCP',\n        changeType:    typeMap[operation] || 'FEATURE',\n        isBreaking:    operation === 'deleted',\n        title:         `[TABLE] ${operation}: ${columnLabel}`,\n        description:   description || null,\n        apiPath:       null,\n        previousValue,\n        newValue,\n      });\n    }\n  }\n}\n\nconsole.log(`SaveChanges: ${allChanges.length} sistem degisikligi bulk olarak kaydedilecek`);\n\nif (allChanges.length === 0) {\n  return [];\n}\n\nconst ctx0 = dataItems[0] ? dataItems[0].json : {};\nreturn [{\n  json: {\n    items:       allChanges,\n    _backendUrl: ctx0.backendUrl,\n    _token:      ctx0.token,\n    _count:      allChanges.length,\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "abc6e8c3-75a8-4c33-86c8-c89d62659530",
+      "name": "ChangesBackend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1400,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json._backendUrl }}/api/system-changes/bulk",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json._token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ items: $json.items }) }}",
+        "options": {
+          "ignoreResponseCode": true
+        }
+      }
     }
   ],
   "connections": {
@@ -205,14 +255,38 @@
           }
         ]
       ]
+    },
+    "Backend'e Kaydet": {
+      "main": [
+        [
+          {
+            "node": "SaveChanges",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SaveChanges": {
+      "main": [
+        [
+          {
+            "node": "ChangesBackend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
   "settings": {
-    "executionOrder": "v1",
-    "saveManualExecutions": true,
-    "callerPolicy": "workflowsFromSameOwner",
-    "errorWorkflow": ""
+    "executionOrder": "v1"
   },
-  "tags": ["release-notes", "ai", "mcp", "automation"]
+  "tags": [
+    "release-notes",
+    "ai",
+    "mcp",
+    "automation"
+  ]
 }

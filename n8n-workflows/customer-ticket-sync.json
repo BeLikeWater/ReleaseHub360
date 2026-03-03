@@ -1,0 +1,272 @@
+{
+  "name": "Customer Ticket Sync — Zendesk/Jira → Backend",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/15 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "a1b2c3d4-0001-4001-8001-000000000001",
+      "name": "Zamanlı Tetikleyici (15 dk)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.BACKEND_URL }}/api/customers",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.BACKEND_TOKEN }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "a1b2c3d4-0001-4001-8001-000000000002",
+      "name": "Aktif Müşterileri Getir",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4001-8001-000000000003",
+      "name": "Müşteri Listesini Böl",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.ticketPlatform }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4001-8001-000000000004",
+      "name": "Ticket Platformu Var mı?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-2",
+              "leftValue": "={{ $json.ticketPlatform }}",
+              "rightValue": "ZENDESK",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4001-8001-000000000005",
+      "name": "Platform: Zendesk mi?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://{{ $json.zendesk_subdomain }}.zendesk.com/api/v2/tickets/recent.json",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Basic {{ $json.zendesk_token }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "a1b2c3d4-0001-4001-8001-000000000006",
+      "name": "Zendesk Ticketları Getir",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, -120]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.jira_url }}/rest/api/3/search?jql=project={{ $json.jira_project }}+AND+updated>=-1h&maxResults=50",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Basic {{ $json.jira_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "a1b2c3d4-0001-4001-8001-000000000007",
+      "name": "Jira Ticketları Getir",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 120]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize tickets from both platforms\nconst input = $input.all();\nconst normalized = [];\n\nfor (const item of input) {\n  const data = item.json;\n  \n  // Handle Zendesk format\n  if (data.tickets) {\n    for (const ticket of data.tickets) {\n      normalized.push({\n        externalId: String(ticket.id),\n        platform: 'ZENDESK',\n        title: ticket.subject,\n        description: ticket.description,\n        status: ticket.status,\n        priority: ticket.priority?.toUpperCase() ?? 'NORMAL',\n        url: ticket.url,\n        customerId: data._customerId,\n        updatedAt: ticket.updated_at,\n      });\n    }\n  }\n  \n  // Handle Jira format\n  if (data.issues) {\n    for (const issue of data.issues) {\n      normalized.push({\n        externalId: issue.id,\n        platform: 'JIRA',\n        title: issue.fields.summary,\n        description: issue.fields.description?.content?.[0]?.content?.[0]?.text ?? '',\n        status: issue.fields.status?.name,\n        priority: issue.fields.priority?.name?.toUpperCase() ?? 'NORMAL',\n        url: `${data._jiraUrl}/browse/${issue.key}`,\n        customerId: data._customerId,\n        updatedAt: issue.fields.updated,\n      });\n    }\n  }\n}\n\nreturn normalized.map(t => ({ json: t }));\n"
+      },
+      "id": "a1b2c3d4-0001-4001-8001-000000000008",
+      "name": "Ticketları Normalize Et",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.BACKEND_URL }}/api/ticket-mappings/upsert",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.BACKEND_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "a1b2c3d4-0001-4001-8001-000000000009",
+      "name": "Backend'e Kaydet (TicketMapping)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1540, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = $input.all();\nconst synced = results.filter(r => r.json.success).length;\nconst failed = results.filter(r => !r.json.success).length;\nconsole.log(`Ticket Sync: ${synced} başarılı, ${failed} başarısız`);\nreturn [{ json: { synced, failed, timestamp: new Date().toISOString() } }];"
+      },
+      "id": "a1b2c3d4-0001-4001-8001-000000000010",
+      "name": "Sonuç Özeti",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1760, 0]
+    }
+  ],
+  "connections": {
+    "Zamanlı Tetikleyici (15 dk)": {
+      "main": [
+        [{ "node": "Aktif Müşterileri Getir", "type": "main", "index": 0 }]
+      ]
+    },
+    "Aktif Müşterileri Getir": {
+      "main": [
+        [{ "node": "Müşteri Listesini Böl", "type": "main", "index": 0 }]
+      ]
+    },
+    "Müşteri Listesini Böl": {
+      "main": [
+        [{ "node": "Ticket Platformu Var mı?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Ticket Platformu Var mı?": {
+      "main": [
+        [{ "node": "Platform: Zendesk mi?", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Platform: Zendesk mi?": {
+      "main": [
+        [{ "node": "Zendesk Ticketları Getir", "type": "main", "index": 0 }],
+        [{ "node": "Jira Ticketları Getir", "type": "main", "index": 0 }]
+      ]
+    },
+    "Zendesk Ticketları Getir": {
+      "main": [
+        [{ "node": "Ticketları Normalize Et", "type": "main", "index": 0 }]
+      ]
+    },
+    "Jira Ticketları Getir": {
+      "main": [
+        [{ "node": "Ticketları Normalize Et", "type": "main", "index": 0 }]
+      ]
+    },
+    "Ticketları Normalize Et": {
+      "main": [
+        [{ "node": "Backend'e Kaydet (TicketMapping)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Backend'e Kaydet (TicketMapping)": {
+      "main": [
+        [{ "node": "Sonuç Özeti", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "1.0.0",
+  "tags": ["ticket-sync", "customer", "zendesk", "jira"]
+}

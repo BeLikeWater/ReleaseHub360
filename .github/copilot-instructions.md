@@ -287,6 +287,16 @@ Format: Her skill dosyasında `## Handoff Notu — Zorunlu Çıktı` bölümünd
 
 ---
 
+## Scope Dışı Dizinler
+
+Aşağıdaki dizinler projede YER ALSA da artık aktif geliştirme kapsamında DEĞİLDİR. Tarama, analiz, grep, migration ve kod üretimi sırasında bu dizinler **tamamen yoksayılmalıdır:**
+
+- `ReleaseHub360/` — (kök dizindeki eski React uygulaması, silinecek)
+
+Bu dizinlerdeki dosyalar hiçbir karara referans alınmamalı, tasarım dokümanlarına dahil edilmemeli ve gap analizine katılmamalıdır.
+
+---
+
 ## Proje Bağlamı
 
 - **Stack:** React 19 + MUI v7 (frontend), Express + TypeScript (backend), PostgreSQL 16

@@ -3,6 +3,8 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { createTheme, ThemeProvider, CssBaseline } from '@mui/material';
 import { RouterProvider } from 'react-router-dom';
 import { router } from '@/routes';
+import { SnackbarProvider } from '@/components/shared/SnackbarProvider';
+import { ErrorBoundary } from '@/components/shared/ErrorBoundary';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -29,7 +31,10 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        <RouterProvider router={router} />
+        <ErrorBoundary>
+          <RouterProvider router={router} />
+        </ErrorBoundary>
+        <SnackbarProvider />
       </ThemeProvider>
       <ReactQueryDevtools initialIsOpen={false} />
     </QueryClientProvider>

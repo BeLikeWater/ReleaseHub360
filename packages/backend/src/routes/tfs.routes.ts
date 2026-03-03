@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticateJWT } from '../middleware/auth.middleware';
 import { AppError } from '../middleware/errorHandler.middleware';
+import { decrypt } from '../lib/encryption';
 import prisma from '../lib/prisma';
 
 const router = Router();
@@ -12,12 +13,14 @@ type Creds = { org: string; project: string; releaseProject: string; pat: string
 async function resolveCredentials(productId?: string): Promise<Creds> {
   if (productId) {
     const product = await prisma.product.findUnique({ where: { id: productId } });
-    if (product?.pmType === 'AZURE' && product.azureOrg && product.azureProject && product.azurePat) {
+    // pmType is deprecated — check both pmType and sourceControlType for backward compat
+    const isAzure = product?.pmType === 'AZURE' || product?.sourceControlType === 'AZURE';
+    if (product && isAzure && product.azureOrg && product.azureProject && product.azurePat) {
       return {
         org: product.azureOrg,
         project: product.azureProject,
         releaseProject: product.azureReleaseProject || product.azureProject,
-        pat: product.azurePat,
+        pat: decrypt(product.azurePat),
       };
     }
   }
@@ -308,6 +311,132 @@ const fetchWithTimeout = (url: string, opts: RequestInit, ms = 15_000): Promise<
   return fetch(url, { ...opts, signal: controller.signal }).finally(() => clearTimeout(tid));
 };
 
+// GET /api/tfs/last-prep-releases?productId=X
+// Her servis için "Son Release" bilgisini döner:
+//   - releaseName dolu + prepStageName dolu → prepStageName environment'ı succeeded olan en son release
+//   - releaseName dolu + prepStageName boş  → en son tetiklenen release ($top=1, status filtresi yok)
+//   - releaseName boş → servis atlanır
+// Servis bazlı releaseProject override'ını destekler.
+router.get('/last-prep-releases', async (req, res, next) => {
+  try {
+    const { productId } = req.query;
+    if (!productId) throw new AppError(400, 'productId zorunlu');
+
+    const creds = await resolveCredentials(String(productId));
+    if (!creds.org || !creds.pat) throw new AppError(400, 'Azure credentials bulunamadı');
+
+    const product = await prisma.product.findUnique({
+      where: { id: String(productId) },
+      include: {
+        services: true,
+        moduleGroups: { include: { modules: { include: { services: true } } } },
+      },
+    });
+    if (!product) throw new AppError(404, 'Ürün bulunamadı');
+
+    // Tüm servisleri topla (deduplication ile)
+    const allServicesMap = new Map<string, {
+      id: string;
+      releaseName: string | null;
+      prepStageName: string | null;
+      releaseProject: string | null;
+    }>();
+    product.services.forEach(s => allServicesMap.set(s.id, s));
+    product.moduleGroups.forEach(g =>
+      g.modules.forEach(m => m.services.forEach(s => allServicesMap.set(s.id, s)))
+    );
+
+    const headers = buildHeaders(creds.pat);
+    const defIdCache = new Map<string, number | null>(); // releaseName → defId (null = bulunamadı)
+
+    const results: { serviceId: string; lastPrepReleaseName: string | null }[] = [];
+    let authError: string | null = null;
+
+    await Promise.allSettled(
+      [...allServicesMap.values()].map(async (svc) => {
+        // releaseName yoksa bu servis için release sorgusu yapılamaz — atla
+        if (!svc.releaseName) return;
+
+        // Servis bazlı releaseProject override — yoksa product'ın azureReleaseProject → azureProject fallback
+        const releaseProject = svc.releaseProject
+          ?? product.azureReleaseProject
+          ?? creds.releaseProject;
+        const vsrmBase = `https://vsrm.dev.azure.com/${creds.org}/${releaseProject}/_apis`;
+
+        try {
+          // 1) Release Definition ID (cache)
+          const defKey = `${releaseProject}::${svc.releaseName.toLowerCase()}`;
+          let defId = defIdCache.get(defKey);
+          if (defId === undefined) {
+            const defUrl = `${vsrmBase}/release/definitions?searchText=${encodeURIComponent(svc.releaseName)}&api-version=7.1`;
+            const r = await fetchWithTimeout(defUrl, { headers });
+            if (!r.ok) {
+              if (r.status === 401 || r.status === 403) {
+                authError = `vsrm ${r.status} — Azure kimlik doğrulama hatası. PAT ve proje adını kontrol edin.`;
+              }
+              defIdCache.set(defKey, null);
+              return;
+            }
+            const d = (await r.json()) as { value?: { id: number; name: string }[] };
+            const matched = (d.value ?? []).find(
+              x => x.name.toLowerCase() === svc.releaseName!.toLowerCase()
+            ) ?? d.value?.[0];
+            defId = matched?.id ?? null;
+            defIdCache.set(defKey, defId ?? null);
+          }
+          if (!defId) return;
+
+          if (svc.prepStageName) {
+            // prepStageName varsa: en son succeeded release'i bul
+            const relR = await fetchWithTimeout(
+              `${vsrmBase}/release/releases?definitionId=${defId}&$top=50&$expand=environments&api-version=7.1`,
+              { headers },
+            );
+            if (!relR.ok) {
+              if (relR.status === 401 || relR.status === 403) {
+                authError = `vsrm ${relR.status} — Azure kimlik doğrulama hatası.`;
+              }
+              return;
+            }
+            const relD = (await relR.json()) as {
+              value?: {
+                name: string;
+                environments: { name: string; status: string }[];
+              }[];
+            };
+            const releases = relD.value ?? [];
+            const prepLower = svc.prepStageName.toLowerCase();
+            const found = releases.find(rel => {
+              const env = rel.environments?.find(e => e.name.toLowerCase() === prepLower);
+              return env?.status?.toLowerCase() === 'succeeded';
+            });
+            results.push({ serviceId: svc.id, lastPrepReleaseName: found?.name ?? null });
+          } else {
+            // prepStageName boşsa: en son tetiklenen release (status filtresi yok)
+            const relUrl = `${vsrmBase}/release/releases?definitionId=${defId}&$top=1&api-version=7.1`;
+            const relR = await fetchWithTimeout(relUrl, { headers });
+            if (!relR.ok) {
+              if (relR.status === 401 || relR.status === 403) {
+                authError = `vsrm ${relR.status} — Azure kimlik doğrulama hatası.`;
+              }
+              return;
+            }
+            const relD = (await relR.json()) as { value?: { name: string }[] };
+            const latestName = relD.value?.[0]?.name ?? null;
+            results.push({ serviceId: svc.id, lastPrepReleaseName: latestName });
+          }
+        } catch {
+          results.push({ serviceId: svc.id, lastPrepReleaseName: null });
+        }
+      }),
+    );
+
+    res.json({ data: results, ...(authError ? { authError } : {}) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/tfs/release-delta?productId=X
 // currentVersion → lastReleaseName arasındaki merged PR'ları servis bazlı döner.
 // Aynı repo için PR listesi bir kez çekilir (cache).
@@ -443,4 +572,171 @@ router.get('/release-delta', async (req, res, next) => {
   }
 });
 
+// POST /api/tfs/refresh-prep-release?productId=X[&serviceId=Y]
+// Bir veya tüm servisler için Azure VSRM'den son prep release adı + tarihini çeker
+// ve services tablosuna yazar (lastPrepReleaseName + lastPrepReleaseDate).
+// serviceId verilmezse ürünün tüm servisleri güncellenir.
+router.post('/refresh-prep-release', async (req, res, next) => {
+  try {
+    const productId = String(req.query.productId ?? '');
+    const serviceId = req.query.serviceId ? String(req.query.serviceId) : null;
+
+    if (!productId) throw new AppError(400, 'productId zorunludur');
+
+    // Ürün + servisler + creds
+    const product = await prisma.product.findUnique({
+      where: { id: productId },
+      include: {
+        services: true,
+        moduleGroups: { include: { modules: { include: { services: true } } } },
+      },
+    });
+    if (!product) throw new AppError(404, 'Ürün bulunamadı');
+
+    const creds = await resolveCredentials(productId);
+    if (!creds.pat) throw new AppError(400, 'Azure PAT tanımlı değil');
+
+    // Tüm servisleri birleştir (düz liste, tekrarsız)
+    const allServicesMap = new Map<string, {
+      id: string;
+      releaseName: string | null;
+      prepStageName: string | null;
+      releaseProject: string | null;
+    }>();
+    product.services.forEach(s => allServicesMap.set(s.id, s));
+    product.moduleGroups.forEach(g =>
+      g.modules.forEach(m => m.services.forEach(s => allServicesMap.set(s.id, s)))
+    );
+
+    // Hedef servisleri belirle
+    const targets = serviceId
+      ? [allServicesMap.get(serviceId)].filter(Boolean) as typeof product.services
+      : [...allServicesMap.values()];
+
+    if (serviceId && targets.length === 0) {
+      throw new AppError(404, 'Servis bulunamadı veya bu ürüne ait değil');
+    }
+
+    const headers = buildHeaders(creds.pat);
+    const defIdCache = new Map<string, number | null>();
+
+    type RefreshResult = {
+      serviceId: string;
+      lastPrepReleaseName: string | null;
+      lastPrepReleaseDate: string | null;
+      error?: string;
+    };
+    const results: RefreshResult[] = [];
+    let authError: string | null = null;
+
+    await Promise.allSettled(
+      targets.map(async (svc) => {
+        if (!svc.releaseName) {
+          results.push({ serviceId: svc.id, lastPrepReleaseName: null, lastPrepReleaseDate: null });
+          return;
+        }
+
+        const releaseProject = svc.releaseProject
+          ?? product.azureReleaseProject
+          ?? creds.releaseProject;
+        const vsrmBase = `https://vsrm.dev.azure.com/${creds.org}/${releaseProject}/_apis`;
+
+        try {
+          // 1) Definition ID (cache per releaseProject + releaseName)
+          const defKey = `${releaseProject}::${svc.releaseName.toLowerCase()}`;
+          let defId = defIdCache.get(defKey);
+          if (defId === undefined) {
+            const defUrl = `${vsrmBase}/release/definitions?searchText=${encodeURIComponent(svc.releaseName)}&api-version=7.1`;
+            const r = await fetchWithTimeout(defUrl, { headers });
+            if (!r.ok) {
+              if (r.status === 401 || r.status === 403) {
+                authError = `vsrm ${r.status} — Azure kimlik doğrulama hatası. PAT ve proje adını kontrol edin.`;
+              }
+              defIdCache.set(defKey, null);
+              results.push({ serviceId: svc.id, lastPrepReleaseName: null, lastPrepReleaseDate: null, error: `definition lookup ${r.status}` });
+              return;
+            }
+            const d = (await r.json()) as { value?: { id: number; name: string }[] };
+            const matched = (d.value ?? []).find(
+              x => x.name.toLowerCase() === svc.releaseName!.toLowerCase()
+            ) ?? d.value?.[0];
+            defId = matched?.id ?? null;
+            defIdCache.set(defKey, defId ?? null);
+          }
+          if (!defId) {
+            results.push({ serviceId: svc.id, lastPrepReleaseName: null, lastPrepReleaseDate: null, error: 'definition not found' });
+            return;
+          }
+
+          let releaseName: string | null = null;
+          let releaseDate: string | null = null;
+
+          if (svc.prepStageName) {
+            // prepStageName dolu → succeeded olan en son release'i bul
+            const relR = await fetchWithTimeout(
+              `${vsrmBase}/release/releases?definitionId=${defId}&$top=50&$expand=environments&api-version=7.1`,
+              { headers },
+            );
+            if (!relR.ok) {
+              if (relR.status === 401 || relR.status === 403) {
+                authError = `vsrm ${relR.status} — Azure kimlik doğrulama hatası.`;
+              }
+              results.push({ serviceId: svc.id, lastPrepReleaseName: null, lastPrepReleaseDate: null, error: `releases ${relR.status}` });
+              return;
+            }
+            const relD = (await relR.json()) as {
+              value?: { name: string; createdOn?: string; environments: { name: string; status: string }[] }[];
+            };
+            const prepLower = svc.prepStageName.toLowerCase();
+            const found = (relD.value ?? []).find(rel => {
+              const env = rel.environments?.find(e => e.name.toLowerCase() === prepLower);
+              return env?.status?.toLowerCase() === 'succeeded';
+            });
+            releaseName = found?.name ?? null;
+            releaseDate = found?.createdOn ?? null;
+          } else {
+            // prepStageName boş → en son tetiklenen release
+            const relR = await fetchWithTimeout(
+              `${vsrmBase}/release/releases?definitionId=${defId}&$top=1&api-version=7.1`,
+              { headers },
+            );
+            if (!relR.ok) {
+              if (relR.status === 401 || relR.status === 403) {
+                authError = `vsrm ${relR.status} — Azure kimlik doğrulama hatası.`;
+              }
+              results.push({ serviceId: svc.id, lastPrepReleaseName: null, lastPrepReleaseDate: null, error: `releases ${relR.status}` });
+              return;
+            }
+            const relD = (await relR.json()) as { value?: { name: string; createdOn?: string }[] };
+            releaseName = relD.value?.[0]?.name ?? null;
+            releaseDate = relD.value?.[0]?.createdOn ?? null;
+          }
+
+          // 2) DB'ye yaz
+          await prisma.service.update({
+            where: { id: svc.id },
+            data: {
+              lastPrepReleaseName: releaseName,
+              lastPrepReleaseDate: releaseDate ? new Date(releaseDate) : null,
+            },
+          });
+
+          results.push({
+            serviceId: svc.id,
+            lastPrepReleaseName: releaseName,
+            lastPrepReleaseDate: releaseDate,
+          });
+        } catch {
+          results.push({ serviceId: svc.id, lastPrepReleaseName: null, lastPrepReleaseDate: null, error: 'unexpected error' });
+        }
+      }),
+    );
+
+    res.json({ data: results, ...(authError ? { authError } : {}) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;
+

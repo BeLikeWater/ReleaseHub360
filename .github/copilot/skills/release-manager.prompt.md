@@ -302,8 +302,25 @@ Her review sonunda ilgili `designs/` dosyasına şu bölümü ekle:
 |---|---|
 | **UX** çıktısı | Tüm AC ekranları wireframe'de var mı? Rol bazlı erişim tasarlandı mı? Boş/hata state'leri var mı? |
 | **Backend** çıktısı | Frontend'in tüm endpoint ihtiyaçları karşılandı mı? Breaking change var mı? Auth koruması tam mı? |
-| **Frontend** çıktısı | AC'ler görsel olarak ekranda var mı? TypeScript hatasız mı? Firebase sıfır mı? |
+| **Frontend** çıktısı | AC'ler görsel olarak ekranda var mı? TypeScript hatasız mı? Firebase sıfır mı? **Her "endpoint mevcut" AC için TSX'de gerçekten useQuery çağrısı var mı?** |
 | **QA** çıktısı | Kritik bug'lar hepsi RESOLVED mi? Release blocker sayısı nedir? |
+
+### Frontend Review — Endpoint Varlık Kontrolü
+
+Frontend çıktısını review ederken task'taki her AC için şunu sor:
+
+> "Bu AC'de bahsedilen veri ekranda görünüyor mu? Ekranda görünmesi için ilgili endpoint mutlaka TSX'de çağrılmalı."
+
+Kontrol yöntemi: İlgili endpoint path'ini TSX dosyasında grep ile ara:
+```
+grep -n 'service-release-snapshots\|version-packages\|transition-plan' pages/{Page}.tsx
+```
+Sonuç satır vermiyorsa → **AC tamamlanmamış → blocker**
+
+**Ekran review'unda 3 kritik soru:**
+1. UI'da kullanılan her API endpoint'i gerçekten çağrılıyor mu? ("mevcut" ≠ "kullanılan")
+2. Mutation'larda tarih alanları ISO formatına dönüştürülmüş mü? (`new Date(str).toISOString()`)
+3. Sub-bileşenler kendi verilerini lazy-load yapıyor mu, yoksa boş render mı dönüyor?
 
 ### Sprint Durum Değerlendirmesi
 

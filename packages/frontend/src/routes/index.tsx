@@ -8,13 +8,14 @@ import LoginPage from '@/pages/LoginPage';
 // Protected pages (lazy-loaded stubs)
 import HomeDashboardPage from '@/pages/HomeDashboardPage';
 import ReleaseHealthCheckPage from '@/pages/ReleaseHealthCheckPage';
-import ProductCatalogPage from '@/pages/ProductCatalogPage';
+import ProductCatalogPage from '@/pages/product-catalog';
 import ReleaseCalendarPage from '@/pages/ReleaseCalendarPage';
 import ReleasesPage from '@/pages/ReleasesPage';
 import ReleaseNotesPage from '@/pages/ReleaseNotesPage';
 import HotfixMerkeziPage from '@/pages/HotfixMerkeziPage';
-import CustomerManagementPage from '@/pages/CustomerManagementPage';
+import CustomerManagementPage from '@/pages/customer-management';
 import CustomerDashboardPage from '@/pages/CustomerDashboardPage';
+import CustomerProductVersionsPage from '@/pages/CustomerProductVersionsPage';
 import CodeSyncPage from '@/pages/CodeSyncPage';
 import ServiceVersionMatrixPage from '@/pages/ServiceVersionMatrixPage';
 import ChangeTrackingPage from '@/pages/ChangeTrackingPage';
@@ -55,6 +56,9 @@ export const router = createBrowserRouter([
       { path: 'hotfix-merkezi', element: <HotfixMerkeziPage /> },
       { path: 'customer-management', element: <CustomerManagementPage /> },
       { path: 'customer-dashboard', element: <CustomerDashboardPage /> },
+      { path: 'customers/:id', element: <CustomerDashboardPage /> },
+      { path: 'customers/:id/dashboard', element: <CustomerDashboardPage /> },
+      { path: 'customers/:id/products/:productId', element: <CustomerProductVersionsPage /> },
       { path: 'code-sync', element: <CodeSyncPage /> },
       { path: 'service-version-matrix', element: <ServiceVersionMatrixPage /> },
       { path: 'change-tracking', element: <ChangeTrackingPage /> },

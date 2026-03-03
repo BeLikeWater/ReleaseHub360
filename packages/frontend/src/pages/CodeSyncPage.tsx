@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import {
   Box, Typography, Button, Card, CardContent, Chip, LinearProgress,
   Tab, Tabs, Alert, Select, MenuItem, FormControl, InputLabel,
@@ -45,7 +45,7 @@ type SyncStatus = {
 type SyncRecord = {
   id: string; status: string; syncBranchName?: string; sourceBranch: string; targetBranch: string;
   createdAt: string; completedAt?: string;
-  payload?: { prIds?: number[]; prUrl?: string; targetVersionId?: string; sourceVersionId?: string } | null;
+  payload?: { prIds?: number[]; prUrl?: string; targetVersionId?: string; sourceVersionId?: string; sourceVersionStr?: string; targetVersionStr?: string; workitemCount?: number | null } | null;
   conflictDetails?: { prId?: number; files?: string[] } | null;
   customerBranch: { branchName: string; repoName?: string | null };
 };
@@ -54,6 +54,16 @@ type SyncRecord = {
 
 const WI_ICONS: Record<string, string> = { Feature: '✨', Bug: '🐛', 'User Story': '📋', PBI: '📋', Task: '📋' };
 const wiIcon = (type: string) => WI_ICONS[type] ?? '📋';
+
+// Semantic version comparator (BUG-017)
+const parseVer = (s: string) => s.replace(/^v/, '').split('.').map(x => parseInt(x, 10) || 0);
+const isHigherVersion = (a: string, b: string): boolean => {
+  const av = parseVer(a); const bv = parseVer(b);
+  for (let i = 0; i < Math.max(av.length, bv.length); i++) {
+    if ((av[i] ?? 0) !== (bv[i] ?? 0)) return (av[i] ?? 0) > (bv[i] ?? 0);
+  }
+  return false;
+};
 
 function StatusChip({ status }: { status: string }) {
   const cfg: Record<string, { label: string; color: 'success' | 'warning' | 'error' | 'info' | 'default' }> = {
@@ -154,12 +164,11 @@ export default function CodeSyncPage() {
 
   const startSyncMutation = useMutation({
     mutationFn: () => {
-      const summary = (deltaData?.workitems ?? [])
-        .filter(wi => wi.prs.some(pr => selectedPrIds.has(pr.prId)))
-        .map(wi => `• ${wi.title} (#${wi.id})`).join('\n');
+      const workitems = (deltaData?.workitems ?? []).filter(wi => wi.prs.some(pr => selectedPrIds.has(pr.prId)));
+      const summary = workitems.map(wi => `• ${wi.title} (#${wi.id})`).join('\n');
       return apiClient.post('/code-sync/start', {
         serviceId: selectedServiceId, customerBranchId: selectedCustomerBranchId,
-        sourceVersionId, targetVersionId, prIds: [...selectedPrIds], workitemSummary: summary,
+        sourceVersionId, targetVersionId, prIds: [...selectedPrIds], workitemSummary: summary, workitemCount: workitems.length,
       }).then(r => r.data.data);
     },
     onSuccess: (data: { syncId: string }) => { setConfirmOpen(false); setActiveSyncId(data.syncId); },
@@ -209,7 +218,16 @@ export default function CodeSyncPage() {
   const srcVer = versions.find(v => v.id === sourceVersionId);
   const tgtVer = versions.find(v => v.id === targetVersionId);
   const selBranch = customerBranches.find(b => b.id === selectedCustomerBranchId);
+  const selectedService = services.find(s => s.id === selectedServiceId);
   const canLoadDelta = !!(sourceVersionId && targetVersionId && selectedServiceId && selectedCustomerBranchId);
+
+  // BUG-015: expected sync branch preview
+  const expectedSyncBranch = useMemo(() => {
+    if (!tgtVer || !selectedService) return '';
+    const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const safeName = (selectedService.name ?? selectedServiceId).toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 30);
+    return `sync/v${tgtVer.version.replace(/^v/, '')}-${safeName}-${date}`;
+  }, [tgtVer, selectedService, selectedServiceId]);
 
   // ── Active sync progress rendering ──
   if (activeSyncId && syncStatus) {
@@ -286,7 +304,14 @@ export default function CodeSyncPage() {
             <FormControl size="small" sx={{ minWidth: 140 }} disabled={!selectedProductId}>
               <InputLabel>Hedef Versiyon</InputLabel>
               <Select value={targetVersionId} label="Hedef Versiyon" onChange={e => { setTargetVersionId(e.target.value); setDeltaParams(null); }}>
-                {versions.filter(v => v.id !== sourceVersionId).map(v => <MenuItem key={v.id} value={v.id}>{v.version}</MenuItem>)}
+                {versions
+                  .filter(v => v.id !== sourceVersionId)
+                  .filter(v => {
+                    const srcV = versions.find(x => x.id === sourceVersionId);
+                    if (!srcV) return true;
+                    return isHigherVersion(v.version, srcV.version);
+                  })
+                  .map(v => <MenuItem key={v.id} value={v.id}>{v.version}</MenuItem>)}
               </Select>
             </FormControl>
 
@@ -503,6 +528,9 @@ export default function CodeSyncPage() {
             <Typography variant="body2"><strong>Branch:</strong> {selBranch?.branchName}</Typography>
             <Typography variant="body2"><strong>Repo:</strong> {selBranch?.repoName}</Typography>
             <Typography variant="body2"><strong>Versiyon:</strong> {srcVer?.version} → {tgtVer?.version}</Typography>
+            {expectedSyncBranch && (
+              <Typography variant="body2"><strong>Oluşturulacak Branch:</strong> <code style={{ fontSize: 12 }}>{expectedSyncBranch}</code></Typography>
+            )}
           </Box>
           {startSyncMutation.isError && (
             <Alert severity="error" sx={{ mt: 1 }}>
@@ -670,8 +698,8 @@ function HistoryTab({ records }: { records: SyncRecord[] }) {
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2 }}>
               <Box sx={{ flex: 1, minWidth: 0 }}>
                 <Typography variant="body2" fontWeight={600} noWrap>
-                  {r.payload?.sourceVersionId ?? r.sourceBranch} → {r.payload?.targetVersionId ?? r.targetBranch}
-                  {'  '}· {(r.payload?.prIds)?.length ?? '?'} PR
+                  {r.payload?.sourceVersionStr ?? r.payload?.sourceVersionId ?? r.sourceBranch} → {r.payload?.targetVersionStr ?? r.payload?.targetVersionId ?? r.targetBranch}
+                  {'  '}· {r.payload?.workitemCount != null ? `${r.payload.workitemCount} workitem, ` : ''}{(r.payload?.prIds)?.length ?? '?'} PR
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
                   {r.customerBranch.branchName} · {new Date(r.createdAt).toLocaleDateString('tr-TR')}

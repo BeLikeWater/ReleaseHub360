@@ -1,0 +1,619 @@
+/**
+ * ReleaseHub360 — GitHub Issue Creator
+ * DESIGN_DOCUMENT.md'deki tüm yapılacakları GitHub issue olarak oluşturur.
+ * 
+ * Kullanım: node tasks/create-github-issues.mjs
+ */
+
+import { readFileSync } from 'fs';
+import { request } from 'https';
+import { resolve } from 'path';
+
+// .env'den oku
+const envPath = resolve(process.cwd(), 'packages/backend/.env');
+const envContent = readFileSync(envPath, 'utf8');
+const env = Object.fromEntries(
+  envContent.split('\n')
+    .filter(line => line.includes('=') && !line.startsWith('#'))
+    .map(line => {
+      const [key, ...rest] = line.split('=');
+      return [key.trim(), rest.join('=').trim().replace(/^"|"$/g, '')];
+    })
+);
+
+const TOKEN = env.GITHUB_TOKEN;
+const OWNER = env.GITHUB_OWNER;
+const REPO  = env.GITHUB_REPO;
+
+if (!TOKEN || !OWNER || !REPO) {
+  console.error('❌ GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO .env dosyasında tanımlı olmalı.');
+  process.exit(1);
+}
+
+console.log(`\n🚀 GitHub → ${OWNER}/${REPO}\n`);
+
+// ──────────────────────────────────────────────
+// Label tanımları
+// ──────────────────────────────────────────────
+const LABELS = [
+  { name: 'entity:Product',   color: '0075ca', description: 'Product entity ile ilgili' },
+  { name: 'entity:Service',   color: 'e4e669', description: 'Service entity ile ilgili' },
+  { name: 'entity:Customer',  color: 'd93f0b', description: 'Customer entity ile ilgili' },
+  { name: 'type:schema',      color: 'bfd4f2', description: 'Prisma schema değişikliği' },
+  { name: 'type:backend',     color: 'c2e0c6', description: 'Backend endpoint / logic' },
+  { name: 'type:security',    color: 'e11d48', description: 'Şifreleme / güvenlik' },
+  { name: 'type:n8n',         color: 'f97316', description: 'n8n workflow' },
+  { name: 'priority:P0',      color: 'b60205', description: 'Kritik' },
+  { name: 'priority:P1',      color: 'ff9f1c', description: 'Yüksek' },
+  { name: 'priority:P2',      color: 'ffec8b', description: 'Orta' },
+];
+
+// ──────────────────────────────────────────────
+// Issue tanımları — DESIGN_DOCUMENT.md'den
+// ──────────────────────────────────────────────
+const ISSUES = [
+
+  // ─── PRODUCT ────────────────────────────────
+  {
+    title: '[Product] PAT/Token Şifreleme — azurePat & githubToken için AES-256 encrypt/decrypt',
+    labels: ['entity:Product', 'type:security', 'type:backend', 'priority:P0'],
+    body: `## Bağlam
+DESIGN_DOCUMENT.md § 1 — Product
+
+## Yapılacak
+- \`azurePat\` ve \`githubToken\` alanları için AES-256 simetrik şifreleme utility'si yaz
+- \`ENCRYPTION_KEY\` ortam değişkeninden anahtar oku
+- DB'ye yazarken \`encrypt(plainPat)\`, okurken \`decrypt(cipherText)\`
+- API response'da PAT/Token **asla** plain text dönmez → maskeli (\`•••••abc123\`)
+
+## Kabul Kriterleri
+- [ ] \`packages/backend/src/utils/crypto.ts\` — \`encrypt\` / \`decrypt\` export eder
+- [ ] \`azurePat\` DB'ye şifreli yazılır, düz metin olan mevcut değerler migrate edilir
+- [ ] GET /products endpoint'i PAT alanını maskeli döner
+- [ ] \`ENCRYPTION_KEY\` eksikse uygulama başlamaz (startup validation)
+
+## Referans
+docs/DESIGN_DOCUMENT.md → "PAT / Token Şifreleme Kuralı"`,
+  },
+
+  {
+    title: '[Product] GitHub Alanları — githubOwner & githubToken (schema + API)',
+    labels: ['entity:Product', 'type:schema', 'type:backend', 'priority:P1'],
+    body: `## Bağlam
+DESIGN_DOCUMENT.md § 1 — Product
+
+## Yapılacak
+- Prisma schema'ya \`githubOwner: String?\` ve \`githubToken: String?\` ekle (token encrypted)
+- Migration oluştur
+- Product CRUD endpoint'lerini bu alanları kapsayacak şekilde güncelle
+- \`sourceControlType = GITHUB\` ise bu alanlar **zorunlu** validasyonu
+
+## Kabul Kriterleri
+- [ ] Prisma migration başarıyla çalışır
+- [ ] POST/PUT /products → \`githubOwner\` + \`githubToken\` kabul eder
+- [ ] \`githubToken\` DB'ye şifreli yazılır (crypto utility kullanır)
+- [ ] GET response'da \`githubToken\` maskeli döner
+
+## Referans
+docs/DESIGN_DOCUMENT.md → "GitHub Bağlantı Bilgileri"`,
+  },
+
+  {
+    title: '[Product] Yeni Flagler — usesReleaseBranches & concurrentUpdatePolicy',
+    labels: ['entity:Product', 'type:schema', 'type:backend', 'priority:P1'],
+    body: `## Bağlam
+DESIGN_DOCUMENT.md § 1.4 & 1.5 — Product
+
+## Yapılacak
+- \`usesReleaseBranches: Boolean @default(false)\` ekle
+- \`concurrentUpdatePolicy: Enum (WARN | BLOCK) @default(WARN)\` ekle
+- Migration oluştur
+- Health Check PR toplama mantığını \`usesReleaseBranches\` değerine göre güncelle
+
+## Kabul Kriterleri
+- [ ] Her iki alan Prisma schema'da ve migration'da var
+- [ ] \`usesReleaseBranches = true\` → Health Check iki aşamalı PR toplama yapar
+- [ ] \`concurrentUpdatePolicy = BLOCK\` → aynı güne ikinci müşteri giriş yapamaz
+- [ ] \`WARN\` durumunda frontend uyarı alır ama devam edebilir
+
+## Referans
+docs/DESIGN_DOCUMENT.md → "Branch Stratejisi", "Eşzamanlı Müşteri Güncelleme Politikası"`,
+  },
+
+  {
+    title: '[Product] Alan Temizliği — pmType → sourceControlType, deploymentType → artifactType',
+    labels: ['entity:Product', 'type:schema', 'type:backend', 'priority:P1'],
+    body: `## Bağlam
+DESIGN_DOCUMENT.md § 1 — Mevcut Durum vs Hedef tablosu
+
+## Yapılacak
+- \`pmType\` → \`sourceControlType\` (rename + enum: \`AZURE | GITHUB\`)
+- \`deploymentType\` → \`artifactType\` (rename + enum: \`DOCKER | BINARY | GIT_SYNC\`)
+- \`repoUrl\` alanını kaldır (Product seviyesinde artık gereksiz — \`azureOrg + azureProject + repoName\` ile hesaplanıyor)
+- Migration oluştur
+- Etkilenen tüm endpoint ve TypeScript tiplerini güncelle
+
+## Kabul Kriterleri
+- [ ] Prisma schema enum'ları doğru tanımlanmış
+- [ ] Migration veri kaybı yaşatmadan tamamlanıyor
+- [ ] \`repoUrl\` DB'den ve tüm API response'lardan kaldırıldı
+- [ ] Frontend tiplerini bozan herhangi bir TypeScript hatası yok
+
+## Referans
+docs/DESIGN_DOCUMENT.md → "Yapılması Gerekenler" (Product)`,
+  },
+
+  // ─── SERVICE ────────────────────────────────
+  {
+    title: '[Service] Stage İkileştirme — prodStageName + prepStageName + stageId\'ler',
+    labels: ['entity:Service', 'type:schema', 'type:backend', 'priority:P0'],
+    body: `## Bağlam
+DESIGN_DOCUMENT.md § 2.4 — Service
+
+## Yapılacak
+- \`releaseStage\` (tek stage) → \`prodStageName\`, \`prepStageName\`, \`prodStageId\`, \`prepStageId\` (dört alan)
+- Mevcut \`releaseStage\` değerlerini \`prodStageName\`'e migrate et
+- Migration oluştur
+- Health Check logic'ini iki stage'li yapıya uyarla
+
+## Kabul Kriterleri
+- [ ] Dört yeni alan Prisma schema'da ve migration'da var
+- [ ] Eski \`releaseStage\` kaldırıldı
+- [ ] Migration mevcut verileri \`prodStageName\`'e taşıyor
+- [ ] Health Check'te \`prodStageName === prepStageName\` kontrolü çalışıyor (tek stage senaryosu)
+
+## Referans
+docs/DESIGN_DOCUMENT.md → "Release Tanımı", "Özel Senaryo: prodStageName = prepStageName"`,
+  },
+
+  {
+    title: '[Service] Stage Getir API — Azure DevOps\'tan stage listesi çekme endpoint\'i',
+    labels: ['entity:Service', 'type:backend', 'priority:P1'],
+    body: `## Bağlam
+DESIGN_DOCUMENT.md § 2.4 — "Stage Seçimi — UX Kararı"
+
+## Yapılacak
+- \`GET /services/:id/stages\` endpoint'i — releaseName gönderilince Azure DevOps'tan stage listesi çeker
+- Azure DevOps API: \`GET releases?definitionId={id}&$top=1\` → stage'leri parse et
+- Product'ın bağlantı bilgilerini (azureOrg, azureProject, azurePat) kullan
+- Frontend için dropdown'a hazır \`string[]\` döner
+
+## Kabul Kriterleri
+- [ ] Endpoint \`{ stages: string[] }\` döner
+- [ ] Azure DevOps bağlantı hatası durumunda anlamlı hata mesajı
+- [ ] PAT decrypt edilip API çağrısında kullanılıyor
+- [ ] 0 release bulunursa boş array değil uyarı döner
+
+## Referans
+docs/DESIGN_DOCUMENT.md → "Stage Seçimi — UX Kararı"`,
+  },
+
+  {
+    title: '[Service] Release Takip Alanları — lastProdReleaseName & lastProdReleaseDate',
+    labels: ['entity:Service', 'type:schema', 'type:backend', 'priority:P1'],
+    body: `## Bağlam
+DESIGN_DOCUMENT.md § 2.4 — "Saklanan vs Runtime Alanlar"
+
+## Yapılacak
+- \`lastProdReleaseName: String?\` ekle — prod'a son yayınlanan release adı
+- \`lastProdReleaseDate: DateTime?\` ekle — son yayınlama tarihi (Health Check başlangıç noktası)
+- \`currentVersion\`, \`currentVersionCreatedAt\`, \`lastReleaseName\` alanlarını kaldır
+- Migration oluştur
+- Service güncelleme endpoint'ine bu alanları dahil et
+
+## Kabul Kriterleri
+- [ ] İki yeni alan schema'da ve migration'da var
+- [ ] Üç eski alan kaldırıldı, migration veri kaybı yaşatmıyor
+- [ ] PUT /services/:id → \`lastProdReleaseName\` ve \`lastProdReleaseDate\` güncellenebiliyor
+- [ ] Health Check PR aralığı \`lastProdReleaseDate\`'i başlangıç olarak kullanıyor
+
+## Referans
+docs/DESIGN_DOCUMENT.md → "Saklanan vs Runtime Alanlar"`,
+  },
+
+  {
+    title: '[Service] Alan Temizliği — serviceImageName → dockerImageName, moduleId NOT NULL',
+    labels: ['entity:Service', 'type:schema', 'type:backend', 'priority:P1'],
+    body: `## Bağlam
+DESIGN_DOCUMENT.md § 2 — Mevcut Durum vs Hedef tablosu
+
+## Yapılacak
+- \`serviceImageName\` → \`dockerImageName\` (rename)
+- \`repoUrl\` kaldır (Service seviyesinde de var — kaldırılacak)
+- \`moduleId\` → NOT NULL yapılacak (nullable → zorunlu)
+- Migration oluştur
+- Etkilenen tüm TypeScript tiplerini güncelle
+
+## Kabul Kriterleri
+- [ ] \`dockerImageName\` schema'da ve API response'da
+- [ ] \`repoUrl\` service schema'dan kaldırıldı
+- [ ] \`moduleId\` NOT NULL — migration mevcut null değerleri kontrol ediyor
+- [ ] TypeScript 0 hata
+
+## Referans
+docs/DESIGN_DOCUMENT.md → "Yapılması Gerekenler" (Service)`,
+  },
+
+  {
+    title: '[Service] Binary Artifacts — binaryArtifacts string[] alanı (BINARY tip için)',
+    labels: ['entity:Service', 'type:schema', 'type:backend', 'priority:P2'],
+    body: `## Bağlam
+DESIGN_DOCUMENT.md § 2.5 — "artifactType = BINARY"
+
+## Yapılacak
+- \`binaryArtifacts: String[]\` alanı ekle (PostgreSQL string array)
+- \`artifactType = BINARY\` ise bu alan doldurmak zorunlu (validasyon)
+- Migration oluştur
+
+## Kabul Kriterleri
+- [ ] Alan schema'da var ve migration çalışıyor
+- [ ] POST/PUT /services → \`binaryArtifacts\` array olarak kabul ediliyor
+- [ ] \`artifactType = DOCKER\` ise bu alan yoksayılıyor
+
+## Referans
+docs/DESIGN_DOCUMENT.md → "Artifact Bilgileri — BINARY"`,
+  },
+
+  {
+    title: '[Service] Environment Entity — Product seviyesinde ortam tanımı',
+    labels: ['entity:Service', 'entity:Product', 'type:schema', 'type:backend', 'priority:P1'],
+    body: `## Bağlam
+DESIGN_DOCUMENT.md § 2.6 — "Ortamlar (Environments)"
+
+## Yapılacak
+- \`Environment\` entity: \`name\`, \`url?\`, \`sortOrder\`, \`productId\` (FK)
+- Product'a \`environments Environment[]\` relation ekle
+- Customer'daki \`environments string[]\` alanını kaldır
+- Migration oluştur
+- CRUD endpoint'leri: \`GET/POST/PUT/DELETE /products/:id/environments\`
+
+## Kabul Kriterleri
+- [ ] \`Environment\` tablosu oluşturuluyor
+- [ ] Product → Environment 1:N ilişkisi doğru
+- [ ] Customer'dan \`environments\` kaldırıldı (migration ile)
+- [ ] Endpoint'ler çalışıyor
+
+## Referans
+docs/DESIGN_DOCUMENT.md → "Ortamlar (Environments)"`,
+  },
+
+  {
+    title: '[Service] Container Platform Alanları — DOCKER tip için (containerPlatform, platformUrl, platformToken)',
+    labels: ['entity:Service', 'type:schema', 'type:backend', 'type:security', 'priority:P2'],
+    body: `## Bağlam
+DESIGN_DOCUMENT.md § 2.7 — "artifactType = DOCKER → Container Platform Bilgisi"
+
+## Yapılacak
+- \`containerPlatform: Enum (RANCHER | OPENSHIFT | KUBERNETES | DOCKER_COMPOSE)?\`
+- \`platformUrl: String?\`
+- \`platformToken: String?\` (encrypted — PAT kuralları geçerli)
+- \`clusterName: String?\`, \`namespace: String?\`, \`workloadName: String?\`
+- Migration oluştur
+
+## Kabul Kriterleri
+- [ ] Tüm alanlar schema'da ve migration'da
+- [ ] \`platformToken\` DB'ye şifreli yazılıyor / maskeli dönüyor
+- [ ] \`artifactType = DOCKER\` ise \`containerPlatform\` + \`platformUrl\` zorunlu validasyonu
+
+## Referans
+docs/DESIGN_DOCUMENT.md → "Deployment Hedefi — DOCKER"`,
+  },
+
+  {
+    title: '[Service] VM Deployment Hedefi — DeploymentTarget entity (BINARY tip için)',
+    labels: ['entity:Service', 'type:schema', 'type:backend', 'type:security', 'priority:P2'],
+    body: `## Bağlam
+DESIGN_DOCUMENT.md § 2.7 — "artifactType = BINARY → VM / Sunucu Bilgisi"
+
+## Yapılacak
+- \`DeploymentTarget\` entity: \`environmentName\`, \`hostAddress\`, \`deployPath\`, \`protocol (WMI|SSH|AGENT)\`, \`credential (encrypted)\`
+- Service'e \`deploymentTargets DeploymentTarget[]\` relation
+- Migration oluştur
+- CRUD endpoint'leri
+
+## Kabul Kriterleri
+- [ ] \`DeploymentTarget\` tablosu oluşturuluyor
+- [ ] \`credential\` encrypted saklanıyor / maskeli dönüyor
+- [ ] Post/Put endpoint'leri çalışıyor
+
+## Referans
+docs/DESIGN_DOCUMENT.md → "Deployment Hedefi — BINARY"`,
+  },
+
+  // ─── CUSTOMER ────────────────────────────────
+  {
+    title: '[Customer] emailDomain → emailDomains — tekil string\'den array\'e geçiş',
+    labels: ['entity:Customer', 'type:schema', 'type:backend', 'priority:P0'],
+    body: `## Bağlam
+DESIGN_DOCUMENT.md § 3.1 — Customer
+
+## Yapılacak
+- \`emailDomain: String?\` → \`emailDomains: String[]\` (NOT NULL, PostgreSQL array)
+- Domain uniqueness constraint: aynı domain iki müşteriye atanamaz
+- Migration: mevcut \`emailDomain\` değerini ilk eleman olarak array'e taşı
+- Login flow: kullanıcı e-posta domain'ini \`emailDomains\` listesiyle eşleştir
+
+## Kabul Kriterleri
+- [ ] Migration mevcut verileri kaybetmeden çalışıyor
+- [ ] Domain uniqueness ihlali durumunda anlamlı hata mesajı
+- [ ] Login endpoint'i domain eşleşmesini \`emailDomains\` üzerinden yapıyor
+- [ ] Domain bulunamazsa "Müşteri kaydınız bulunamadı" yanıtı
+
+## Referans
+docs/DESIGN_DOCUMENT.md → "E-posta Domain'i ile Müşteri Eşleme"`,
+  },
+
+  {
+    title: '[Customer] tenantName NOT NULL — zorunlu hale getir',
+    labels: ['entity:Customer', 'type:schema', 'type:backend', 'priority:P1'],
+    body: `## Bağlam
+DESIGN_DOCUMENT.md § 3.1 — Customer, Mevcut Durum vs Hedef tablosu
+
+## Yapılacak
+- \`tenantName\` alanını nullable → NOT NULL yap
+- Migration: mevcut null değer var mı kontrol et, varsa bloklayan migration yaz
+- POST /customers validasyonunu güncelle — \`tenantName\` zorunlu
+
+## Kabul Kriterleri
+- [ ] Migration başarıyla çalışıyor (null veri varsa migration hata veriyor ve açıkça belirtiliyor)
+- [ ] POST /customers → \`tenantName\` eksikse 400 hatası
+- [ ] TypeScript tipi \`tenantName: string\` (non-nullable)`,
+  },
+
+  {
+    title: '[Customer] Ticket Platform Alanları — ticketPlatform, ticketPlatformUrl, ticketApiToken, ticketProjectKey',
+    labels: ['entity:Customer', 'type:schema', 'type:backend', 'type:security', 'priority:P1'],
+    body: `## Bağlam
+DESIGN_DOCUMENT.md § 3.2 — "Talep Yönetim Sistemi (Ticket Source)"
+
+## Yapılacak
+- \`ticketPlatform: Enum (ZENDESK | JIRA | PUSULA | SERVICENOW | OTHER)?\`
+- \`ticketPlatformUrl: String?\`
+- \`ticketApiToken: String?\` (encrypted — PAT kuralları)
+- \`ticketProjectKey: String?\`
+- Migration oluştur
+
+## Kabul Kriterleri
+- [ ] Tüm alanlar schema'da ve migration'da
+- [ ] \`ticketApiToken\` encrypted saklanıyor / maskeli dönüyor
+- [ ] \`ticketPlatform\` seçilmişse diğer alanlar zorunlu validasyonu
+
+## Referans
+docs/DESIGN_DOCUMENT.md → "Ticket Platform Bilgileri"`,
+  },
+
+  {
+    title: '[Customer] Azure Hedef Alanları — targetAreaPath, targetIterationPath, targetWorkItemType, targetTags',
+    labels: ['entity:Customer', 'type:schema', 'type:backend', 'priority:P1'],
+    body: `## Bağlam
+DESIGN_DOCUMENT.md § 3.3 — "Hedef: Azure DevOps"
+
+## Yapılacak
+- \`targetAreaPath: String?\`
+- \`targetIterationPath: String?\`
+- \`targetWorkItemType: String? @default("Bug")\`
+- \`targetTags: String[]\`
+- Migration oluştur
+
+## Kabul Kriterleri
+- [ ] Alanlar schema'da ve migration'da
+- [ ] \`sourceControlType = AZURE\` ise \`targetAreaPath\` zorunlu
+- [ ] CRUD endpoint'leri bu alanları kapsıyor
+
+## Referans
+docs/DESIGN_DOCUMENT.md → "Hedef: Azure DevOps"`,
+  },
+
+  {
+    title: '[Customer] GitHub Hedef Alanları — targetRepo, targetLabels, targetProjectId, targetMilestone',
+    labels: ['entity:Customer', 'type:schema', 'type:backend', 'priority:P1'],
+    body: `## Bağlam
+DESIGN_DOCUMENT.md § 3.3 — "Hedef: GitHub"
+
+## Yapılacak
+- \`targetRepo: String?\`
+- \`targetLabels: String[]\`
+- \`targetProjectId: String?\`
+- \`targetMilestone: String?\`
+- Migration oluştur
+
+## Kabul Kriterleri
+- [ ] Alanlar schema'da ve migration'da
+- [ ] \`sourceControlType = GITHUB\` ise \`targetRepo\` zorunlu
+- [ ] CRUD endpoint'leri bu alanları kapsıyor
+
+## Referans
+docs/DESIGN_DOCUMENT.md → "Hedef: GitHub"`,
+  },
+
+  {
+    title: '[Customer] environments Kaldır — Customer\'dan sil, Product\'a taşı',
+    labels: ['entity:Customer', 'type:schema', 'type:backend', 'priority:P1'],
+    body: `## Bağlam
+DESIGN_DOCUMENT.md § 3 — Mevcut Durum vs Hedef tablosu
+
+## Yapılacak
+- Customer schema'dan \`environments: String[]\` kaldır
+- Environment entity'si Product'a bağlı (bkz: Entity:Service ticket)
+- Migration oluştur
+- Customer endpoint'lerinden \`environments\` alanını temizle
+
+## Kabul Kriterleri
+- [ ] \`environments\` Customer schema'dan kaldırıldı
+- [ ] Migration mevcut değerleri yoksayıyor veya Product'a taşıyor
+- [ ] API response'da \`environments\` Customer altında artık yok
+
+## Bağımlılık
+- "[Service] Environment Entity" ticket'ı önce tamamlanmalı`,
+  },
+
+  {
+    title: '[Customer] TicketMapping Entity — external ticket ↔ workItem eşleme (duplicate önleme)',
+    labels: ['entity:Customer', 'type:schema', 'type:backend', 'priority:P1'],
+    body: `## Bağlam
+DESIGN_DOCUMENT.md § 3.4 — "Talep Aktarım Akışı" adım 6
+
+## Yapılacak
+- \`TicketMapping\` entity: \`externalTicketId\`, \`workItemId\` (veya \`issueNumber\`), \`customerId\`, \`platform\`, \`createdAt\`
+- Unique constraint: \`(externalTicketId, customerId)\`
+- Migration oluştur
+- Ticket oluşturma öncesi duplicate kontrol
+
+## Kabul Kriterleri
+- [ ] \`TicketMapping\` tablosu migration ile oluşuyor
+- [ ] Unique constraint ihlalinde system sessizce atlar (re-throw değil)
+- [ ] Eşleme kaydı ticket oluşturulduktan sonra yazılıyor
+
+## Referans
+docs/DESIGN_DOCUMENT.md → "Duplicate önleme"`,
+  },
+
+  {
+    title: '[Customer] n8n Ticket Workflow — Zendesk/Jira → Azure DevOps/GitHub aktarım akışı',
+    labels: ['entity:Customer', 'type:n8n', 'priority:P2'],
+    body: `## Bağlam
+DESIGN_DOCUMENT.md § 3.4 — "Talep Aktarım Akışı"
+
+## Yapılacak
+Adımlar:
+1. Zamanlı polling veya webhook trigger
+2. Müşteri ticket platformuna bağlan (ticketPlatformUrl + ticketApiToken + ticketProjectKey)
+3. Son sync tarihinden sonraki ticket'ları çek
+4. Ticket → Work Item dönüşümü yap (başlık, açıklama, etiketler)
+5. Azure DevOps'a yaz (\`targetAreaPath\`) veya GitHub'a yaz (\`targetRepo\`)
+6. \`TicketMapping\`'e eşleme kaydı düş
+
+## Kabul Kriterleri
+- [ ] n8n workflow JSON \`n8n-workflows/ticket-sync.json\`'a yazılıyor
+- [ ] Zendesk ve Jira için ayrı branch logic
+- [ ] Duplicate kontrol — \`TicketMapping\` sorgulanıyor
+- [ ] Hata durumunda workflow duraklıyor, kullanıcı bilgilendiriliyor
+
+## Bağımlılık
+- TicketMapping Entity ticket'ı tamamlanmalı
+
+## Referans
+docs/DESIGN_DOCUMENT.md → "Talep Aktarım Akışı (Detay)"`,
+  },
+];
+
+// ──────────────────────────────────────────────
+// GitHub API yardımcıları
+// ──────────────────────────────────────────────
+
+function githubRequest(method, path, body) {
+  return new Promise((resolve, reject) => {
+    const payload = body ? JSON.stringify(body) : null;
+    const opts = {
+      hostname: 'api.github.com',
+      path,
+      method,
+      headers: {
+        'Authorization': `Bearer ${TOKEN}`,
+        'Accept': 'application/vnd.github+json',
+        'User-Agent': 'ReleaseHub360-IssueCreator',
+        'X-GitHub-Api-Version': '2022-11-28',
+        ...(payload ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } : {}),
+      },
+    };
+    const req = request(opts, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (res.statusCode >= 400) {
+            reject(new Error(`${res.statusCode}: ${parsed.message || data}`));
+          } else {
+            resolve(parsed);
+          }
+        } catch {
+          reject(new Error(`Parse error: ${data}`));
+        }
+      });
+    });
+    req.on('error', reject);
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
+async function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+// ──────────────────────────────────────────────
+// Ana akış
+// ──────────────────────────────────────────────
+
+async function run() {
+  // 1. Bağlantı testi
+  console.log('🔍 Repo kontrol ediliyor...');
+  try {
+    const repo = await githubRequest('GET', `/repos/${OWNER}/${REPO}`);
+    console.log(`✅ Repo bulundu: ${repo.full_name}\n`);
+  } catch (err) {
+    console.error(`❌ Repo erişim hatası: ${err.message}`);
+    console.error(`   Kontrol et: OWNER="${OWNER}", REPO="${REPO}"`);
+    process.exit(1);
+  }
+
+  // 2. Mevcut label'lar
+  console.log('🏷  Label\'lar oluşturuluyor...');
+  const existingLabels = await githubRequest('GET', `/repos/${OWNER}/${REPO}/labels?per_page=100`);
+  const existingNames = new Set(existingLabels.map(l => l.name));
+
+  for (const label of LABELS) {
+    if (existingNames.has(label.name)) {
+      console.log(`   ⏭  Mevcut: ${label.name}`);
+    } else {
+      try {
+        await githubRequest('POST', `/repos/${OWNER}/${REPO}/labels`, label);
+        console.log(`   ✅ Oluşturuldu: ${label.name}`);
+        await sleep(300);
+      } catch (err) {
+        console.warn(`   ⚠️  Label hatası (${label.name}): ${err.message}`);
+      }
+    }
+  }
+
+  // 3. Mevcut issue başlıkları (duplicate önleme)
+  console.log('\n📋 Mevcut issue\'lar kontrol ediliyor...');
+  const existingIssues = await githubRequest('GET', `/repos/${OWNER}/${REPO}/issues?state=all&per_page=100`);
+  const existingTitles = new Set(existingIssues.map(i => i.title));
+
+  // 4. Issue'ları oluştur
+  console.log('\n📌 Issue\'lar oluşturuluyor...\n');
+  let created = 0;
+  let skipped = 0;
+
+  for (const issue of ISSUES) {
+    if (existingTitles.has(issue.title)) {
+      console.log(`   ⏭  Mevcut: ${issue.title.substring(0, 70)}...`);
+      skipped++;
+      continue;
+    }
+    try {
+      const result = await githubRequest('POST', `/repos/${OWNER}/${REPO}/issues`, {
+        title: issue.title,
+        body: issue.body,
+        labels: issue.labels,
+      });
+      console.log(`   ✅ #${result.number}: ${issue.title.substring(0, 65)}`);
+      created++;
+      await sleep(500); // rate limit koruma
+    } catch (err) {
+      console.error(`   ❌ Hata (${issue.title.substring(0, 50)}): ${err.message}`);
+    }
+  }
+
+  console.log(`\n─────────────────────────────────────────`);
+  console.log(`✅ Tamamlandı: ${created} oluşturuldu, ${skipped} atlandı`);
+  console.log(`🔗 https://github.com/${OWNER}/${REPO}/issues`);
+  console.log(`─────────────────────────────────────────\n`);
+}
+
+run().catch(err => {
+  console.error('💥 Beklenmeyen hata:', err);
+  process.exit(1);
+});

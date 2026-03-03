@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   Drawer, List, ListItem, ListItemButton, ListItemIcon, ListItemText,
-  Divider, Typography, Box, Tooltip,
+  Divider, Typography, Box, Tooltip, Chip,
 } from '@mui/material';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import HealthAndSafetyIcon from '@mui/icons-material/HealthAndSafety';
@@ -26,8 +26,10 @@ import HistoryIcon from '@mui/icons-material/History';
 import LogoutIcon from '@mui/icons-material/Logout';
 import { useAuthStore } from '@/store/authStore';
 
-interface NavItem { label: string; to: string; icon: React.ReactNode }
-interface NavGroup { title: string; items: NavItem[] }
+// roles: which ORG roles can see this item. undefined = all ORG roles.
+// CUSTOMER users see a separate minimal set.
+interface NavItem { label: string; to: string; icon: React.ReactNode; roles?: string[] }
+interface NavGroup { title: string; items: NavItem[]; roles?: string[] }
 
 const navGroups: NavGroup[] = [
   {
@@ -50,17 +52,19 @@ const navGroups: NavGroup[] = [
   },
   {
     title: 'Değişiklik & Takip',
+    roles: ['ADMIN', 'RELEASE_MANAGER', 'DEVELOPER'],
     items: [
       { label: 'Hotfix Merkezi', to: '/hotfix-merkezi', icon: <BugReportIcon /> },
-      { label: 'Urgent Changes', to: '/urgent-changes', icon: <WarningIcon /> },
+      { label: 'Urgent Changes', to: '/urgent-changes', icon: <WarningIcon />, roles: ['ADMIN', 'RELEASE_MANAGER'] },
       { label: 'Change Tracking', to: '/change-tracking', icon: <TrackChangesIcon /> },
       { label: 'Pipeline Status', to: '/pipeline-status', icon: <AccountTreeIcon /> },
-      { label: 'Code Sync', to: '/code-sync', icon: <SyncAltIcon /> },
+      { label: 'Code Sync', to: '/code-sync', icon: <SyncAltIcon />, roles: ['ADMIN', 'RELEASE_MANAGER'] },
       { label: 'Workflow History', to: '/workflow-history', icon: <HistoryIcon /> },
     ],
   },
   {
     title: 'Müşteri',
+    roles: ['ADMIN', 'RELEASE_MANAGER'],
     items: [
       { label: 'Customer Management', to: '/customer-management', icon: <PeopleIcon /> },
       { label: 'Customer Dashboard', to: '/customer-dashboard', icon: <AccountCircleIcon /> },
@@ -71,8 +75,21 @@ const navGroups: NavGroup[] = [
     title: 'Yönetim',
     items: [
       { label: 'Report Issue', to: '/report-issue', icon: <FlagIcon /> },
-      { label: 'Users & Roles', to: '/users-roles', icon: <AdminPanelSettingsIcon /> },
-      { label: 'Settings', to: '/settings', icon: <SettingsIcon /> },
+      { label: 'Users & Roles', to: '/users-roles', icon: <AdminPanelSettingsIcon />, roles: ['ADMIN'] },
+      { label: 'Settings', to: '/settings', icon: <SettingsIcon />, roles: ['ADMIN'] },
+    ],
+  },
+];
+
+// Minimal nav for CUSTOMER users
+const customerNavGroups: NavGroup[] = [
+  {
+    title: 'Genel',
+    items: [
+      { label: 'Dashboard', to: '/', icon: <DashboardIcon /> },
+      { label: 'Customer Dashboard', to: '/customer-dashboard', icon: <AccountCircleIcon /> },
+      { label: 'Service Version Matrix', to: '/service-version-matrix', icon: <TableChartIcon /> },
+      { label: 'Report Issue', to: '/report-issue', icon: <FlagIcon /> },
     ],
   },
 ];
@@ -81,21 +98,38 @@ interface Props { drawerWidth: number; mobileOpen: boolean; onMobileClose: () =>
 
 export default function Sidebar({ drawerWidth, mobileOpen, onMobileClose }: Props) {
   const logout = useAuthStore((s) => s.logout);
+  const user = useAuthStore((s) => s.user);
   const navigate = useNavigate();
+
+  const isCustomer = user?.userType === 'CUSTOMER';
+  const userRole = user?.role ?? '';
 
   const handleLogout = () => {
     logout();
     navigate('/login');
   };
 
+  const groups = isCustomer ? customerNavGroups : navGroups;
+
+  const visibleGroups = groups
+    .filter(g => !g.roles || g.roles.includes(userRole))
+    .map(g => ({
+      ...g,
+      items: g.items.filter(item => !item.roles || item.roles.includes(userRole)),
+    }))
+    .filter(g => g.items.length > 0);
+
   const drawerContent = (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <Box sx={{ px: 2, py: 2.5 }}>
         <Typography variant="subtitle2" color="text.secondary">ReleaseHub360</Typography>
+        {isCustomer && user?.customerName && (
+          <Chip label={user.customerName} size="small" color="primary" variant="outlined" sx={{ mt: 0.5, fontSize: 10 }} />
+        )}
       </Box>
       <Divider />
       <Box sx={{ flex: 1, overflowY: 'auto', py: 1 }}>
-        {navGroups.map((group) => (
+        {visibleGroups.map((group) => (
           <Box key={group.title} sx={{ mb: 1 }}>
             <Typography variant="caption" sx={{ px: 2, color: 'text.disabled', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>
               {group.title}
@@ -124,6 +158,12 @@ export default function Sidebar({ drawerWidth, mobileOpen, onMobileClose }: Prop
         ))}
       </Box>
       <Divider />
+      <Box sx={{ px: 2, py: 1 }}>
+        <Typography variant="caption" color="text.secondary" noWrap>
+          {user?.name}
+          {isCustomer ? ` · Müşteri` : ` · ${userRole}`}
+        </Typography>
+      </Box>
       <List dense>
         <ListItem disablePadding>
           <ListItemButton onClick={handleLogout} sx={{ mx: 1, borderRadius: 1 }}>
@@ -156,3 +196,4 @@ export default function Sidebar({ drawerWidth, mobileOpen, onMobileClose }: Prop
     </>
   );
 }
+

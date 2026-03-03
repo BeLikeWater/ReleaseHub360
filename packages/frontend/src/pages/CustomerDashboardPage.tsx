@@ -1,302 +1,349 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import {
-  Box, Typography, Tabs, Tab, Card, CardContent, Grid,
-  Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Paper, Chip, CircularProgress, Stack, Breadcrumbs, Link,
-  LinearProgress, Button,
+  Box, Typography, Grid, Card, CardContent, CardActions,
+  Chip, CircularProgress, Stack, Breadcrumbs, Link,
+  Button, Alert, Divider, Tooltip, Paper,
+  Snackbar,
 } from '@mui/material';
 import {
   CheckCircle as CheckCircleIcon,
   WarningAmber as WarningIcon,
   ArrowBack as ArrowBackIcon,
+  ChevronRight as ChevronRightIcon,
+  Inventory2 as ProductIcon,
 } from '@mui/icons-material';
 import { useQuery } from '@tanstack/react-query';
 import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom';
 import api from '@/api/client';
+import { useAuthStore } from '@/store/authStore';
 
-interface Customer {
-  id: string;
-  name: string;
-  code: string;
-  contactEmail?: string;
-  contactPhone?: string;
-  address?: string;
-  notes?: string;
-  isActive: boolean;
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface CustomerDashboardData {
+  customer: {
+    id: string; name: string; code: string; contactEmail: string | null;
+    contactPhone: string | null; address: string | null; notes: string | null;
+    isActive: boolean; environments: string[]; ticketPlatform: string | null;
+  };
+  summary: {
+    totalProducts: number;
+    onLatestCount: number;
+    pendingUpdateCount: number;
+    lastDeployDate: string | null;
+  };
+  productMappings: EnrichedMapping[];
+  serviceMappings: ServiceMapping[];
 }
 
-interface CustomerProductMapping {
+interface EnrichedMapping {
   id: string;
-  customerId: string;
   productVersionId: string;
-  branch?: string;
-  environment?: string;
-  notes?: string;
+  branch: string | null;
+  environment: string | null;
+  notes: string | null;
+  isActive: boolean;
+  subscriptionLevel: string | null;
   productVersion: {
-    id: string;
-    version: string;
-    phase: string;
-    targetDate?: string;
-    releaseDate?: string;
+    id: string; version: string; phase: string;
+    targetDate: string | null; releaseDate: string | null;
     product: { id: string; name: string };
   };
+  latestProductionVersion: { version: string; releaseDate: string | null } | null;
+  isOnLatest: boolean;
 }
 
-const PHASE_ORDER = ['PLANNED', 'DEVELOPMENT', 'RC', 'STAGING', 'PRODUCTION', 'ARCHIVED'];
+interface ServiceMapping {
+  id: string;
+  customerId: string;
+  serviceId: string;
+  port: number | null;
+  branch: string | null;
+  environment: string | null;
+}
 
-const phaseColor = (phase: string) => {
-  const map: Record<string, 'default' | 'info' | 'warning' | 'success' | 'error' | 'primary' | 'secondary'> = {
-    PLANNED: 'default', DEVELOPMENT: 'info', RC: 'primary',
-    STAGING: 'warning', PRODUCTION: 'success', ARCHIVED: 'default',
-  };
-  return map[phase] ?? 'default';
-};
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-function StatCard({ title, value }: { title: string; value: React.ReactNode }) {
+function fmtDate(d: string | null | undefined) {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString('tr-TR', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+// ── Product Card ──────────────────────────────────────────────────────────────
+
+function ProductCard({ mapping, onNavigate }: {
+  mapping: EnrichedMapping;
+  onNavigate: (productId: string) => void;
+}) {
+  const current = mapping.productVersion;
+  const latest = mapping.latestProductionVersion;
+  const needsUpdate = !mapping.isOnLatest && !!latest;
+  const deployDate = current.releaseDate ?? current.targetDate;
+
   return (
-    <Card variant="outlined" sx={{ height: '100%' }}>
-      <CardContent>
-        <Typography variant="h4" fontWeight={700}>{value}</Typography>
-        <Typography variant="body2" color="text.secondary" mt={0.5}>{title}</Typography>
+    <Card
+      variant="outlined"
+      sx={{
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        borderLeft: '4px solid',
+        borderLeftColor: needsUpdate ? 'warning.main' : 'success.main',
+        transition: 'box-shadow 0.2s',
+        '&:hover': { boxShadow: 3 },
+      }}
+    >
+      <CardContent sx={{ flex: 1, pb: 1 }}>
+        <Stack direction="row" justifyContent="space-between" alignItems="flex-start" mb={1.5}>
+          <Box>
+            <Typography variant="subtitle1" fontWeight={700} gutterBottom>
+              {current.product.name}
+            </Typography>
+            {mapping.subscriptionLevel && (
+              <Chip size="small" label={mapping.subscriptionLevel} variant="outlined" sx={{ fontSize: 11 }} />
+            )}
+          </Box>
+          {needsUpdate ? (
+            <Chip
+              icon={<WarningIcon />}
+              label="Güncelleme var"
+              color="warning"
+              size="small"
+              sx={{ fontWeight: 600 }}
+            />
+          ) : (
+            <Chip
+              icon={<CheckCircleIcon />}
+              label="Güncel"
+              color="success"
+              size="small"
+              variant="outlined"
+            />
+          )}
+        </Stack>
+
+        <Stack spacing={0.75}>
+          <Stack direction="row" justifyContent="space-between" alignItems="center">
+            <Typography variant="caption" color="text.secondary">Mevcut versiyon</Typography>
+            <Chip
+              label={current.version}
+              color="primary"
+              size="small"
+              sx={{ fontFamily: 'monospace', fontWeight: 600 }}
+            />
+          </Stack>
+          <Stack direction="row" justifyContent="space-between" alignItems="center">
+            <Typography variant="caption" color="text.secondary">Son sürüm</Typography>
+            {latest ? (
+              <Chip
+                label={latest.version}
+                color={mapping.isOnLatest ? 'success' : 'warning'}
+                variant={mapping.isOnLatest ? 'outlined' : 'filled'}
+                size="small"
+                sx={{ fontFamily: 'monospace', fontWeight: 600 }}
+              />
+            ) : (
+              <Typography variant="caption" color="text.disabled">—</Typography>
+            )}
+          </Stack>
+        </Stack>
+
+        {deployDate && (
+          <>
+            <Divider sx={{ my: 1.5 }} />
+            <Typography variant="caption" color="text.secondary">
+              📅 Son deploy: {fmtDate(deployDate)}
+            </Typography>
+          </>
+        )}
       </CardContent>
+
+      <CardActions sx={{ pt: 0, px: 2, pb: 2 }}>
+        <Button
+          fullWidth
+          variant={needsUpdate ? 'contained' : 'outlined'}
+          color={needsUpdate ? 'warning' : 'primary'}
+          endIcon={<ChevronRightIcon />}
+          onClick={() => onNavigate(current.product.id)}
+          size="small"
+        >
+          Versiyonları Gör
+        </Button>
+      </CardActions>
     </Card>
   );
 }
 
+// ── Main Page ─────────────────────────────────────────────────────────────────
+
 export default function CustomerDashboardPage() {
-  const { id } = useParams<{ id: string }>();
+  const { id: paramId } = useParams<{ id: string }>();
+  const user = useAuthStore((s) => s.user);
+  const id = paramId ?? user?.customerId;
   const navigate = useNavigate();
-  const [tab, setTab] = useState(0);
+  const [toast, setToast] = useState<string | null>(null);
 
-  const { data: customer, isLoading: loadingCustomer } = useQuery<Customer>({
-    queryKey: ['customer', id],
-    queryFn: () => api.get(`/customers/${id}`).then((r) => r.data.data ?? r.data),
+  // ── Queries ───────────────────────────────────────────────────────────────
+  const { data, isLoading, isError } = useQuery<CustomerDashboardData>({
+    queryKey: ['customer-dashboard', id],
+    queryFn: () => api.get(`/dashboard/customer/${id}`).then((r) => r.data.data),
     enabled: !!id,
   });
 
-  const { data: mappings = [], isLoading: loadingMappings } = useQuery<CustomerProductMapping[]>({
-    queryKey: ['customer-product-mappings', id],
-    queryFn: () => api.get(`/customer-product-mappings?customerId=${id}`).then((r) => r.data.data ?? r.data),
+  const { data: issuesData } = useQuery<{ data: { id: string }[] }>({
+    queryKey: ['my-issues', id],
+    queryFn: () => api.get('/transition-issues/my').then((r) => r.data),
     enabled: !!id,
   });
 
-  if (loadingCustomer) {
+  // ── Derived ───────────────────────────────────────────────────────────────
+  const customer = data?.customer;
+  const productMappings = data?.productMappings ?? [];
+  const updatesNeeded = productMappings.filter((m) => !m.isOnLatest).length;
+  const openIssues = issuesData?.data?.length ?? 0;
+
+  const handleViewVersions = (productId: string) => {
+    navigate(`/customers/${id}/products/${productId}`);
+  };
+
+  // ── Loading / Error ───────────────────────────────────────────────────────
+  if (isLoading) {
     return <Box display="flex" justifyContent="center" py={8}><CircularProgress /></Box>;
   }
 
-  if (!customer) {
+  if (isError || !data) {
     return (
       <Box p={3}>
-        <Typography color="error">Müşteri bulunamadı.</Typography>
-        <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/customers')} sx={{ mt: 2 }}>
+        <Alert severity="error">Müşteri bilgileri yüklenemedi.</Alert>
+        <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/customer-management')} sx={{ mt: 2 }}>
           Müşteri Yönetimi'ne Dön
         </Button>
       </Box>
     );
   }
 
-  const productionPhaseIdx = PHASE_ORDER.indexOf('PRODUCTION');
-  const pendingUpdates = mappings.filter((m) => {
-    const idx = PHASE_ORDER.indexOf(m.productVersion.phase);
-    return idx < productionPhaseIdx;
-  });
-
-  const latestVersion = mappings.length > 0
-    ? mappings.sort((a, b) =>
-        PHASE_ORDER.indexOf(b.productVersion.phase) - PHASE_ORDER.indexOf(a.productVersion.phase)
-      )[0]?.productVersion.version
-    : '-';
-
-  const lastDeploy = mappings
-    .filter((m) => m.productVersion.releaseDate)
-    .sort((a, b) => new Date(b.productVersion.releaseDate!).getTime() - new Date(a.productVersion.releaseDate!).getTime())[0]
-    ?.productVersion.releaseDate;
-
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <Box p={3}>
       {/* Breadcrumb */}
-      <Breadcrumbs sx={{ mb: 1 }}>
-        <Link component={RouterLink} to="/customers" color="inherit" underline="hover">
+      <Breadcrumbs sx={{ mb: 2 }}>
+        <Link component={RouterLink} to="/customer-management" underline="hover" color="inherit">
           Müşteri Yönetimi
         </Link>
-        <Typography color="text.primary">{customer.name}</Typography>
+        <Typography color="text.primary">{customer?.name}</Typography>
       </Breadcrumbs>
 
-      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h5" fontWeight={700}>
-          Müşteri Dashboard: {customer.name}
-        </Typography>
-        <Stack direction="row" spacing={1}>
-          <Chip label={customer.code} variant="outlined" size="small" />
-          <Chip
-            label={customer.isActive ? 'Aktif' : 'Pasif'}
-            color={customer.isActive ? 'success' : 'default'}
+      {/* Customer header */}
+      <Stack direction="row" justifyContent="space-between" alignItems="flex-start" mb={3}>
+        <Box>
+          <Typography variant="h5" fontWeight={700}>{customer?.name}</Typography>
+          <Stack direction="row" spacing={1} alignItems="center" mt={0.5}>
+            <Chip
+              size="small"
+              label={customer?.isActive ? 'Aktif' : 'Pasif'}
+              color={customer?.isActive ? 'success' : 'default'}
+              variant="outlined"
+            />
+            {customer?.code && (
+              <Typography variant="body2" color="text.secondary" fontFamily="monospace">
+                #{customer.code}
+              </Typography>
+            )}
+          </Stack>
+        </Box>
+        <Tooltip title="Müşteri Listesine Dön">
+          <Button
+            variant="outlined"
+            startIcon={<ArrowBackIcon />}
+            onClick={() => navigate('/customer-management')}
             size="small"
-          />
-        </Stack>
+          >
+            Müşteri Listesi
+          </Button>
+        </Tooltip>
       </Stack>
 
-      {/* Stat Cards */}
-      <Grid container spacing={2} mb={3}>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <StatCard title="Aktif Ürün" value={mappings.length} />
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <StatCard title="Bekleyen Güncelleme" value={pendingUpdates.length} />
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <StatCard title="En Son Versiyon" value={latestVersion} />
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <StatCard
-            title="Son Deploy"
-            value={lastDeploy ? new Date(lastDeploy).toLocaleDateString('tr-TR') : '-'}
-          />
-        </Grid>
-      </Grid>
+      {/* Summary stat chips */}
+      <Stack direction="row" spacing={2} mb={3} flexWrap="wrap">
+        <Paper variant="outlined" sx={{ px: 2.5, py: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <ProductIcon fontSize="small" color="primary" />
+          <Box>
+            <Typography variant="h6" fontWeight={700} lineHeight={1}>{productMappings.length}</Typography>
+            <Typography variant="caption" color="text.secondary">Aktif Ürün</Typography>
+          </Box>
+        </Paper>
 
-      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>
-        <Tab label="Özet" />
-        <Tab label="Release Takibi" />
-      </Tabs>
+        <Paper
+          variant="outlined"
+          sx={{
+            px: 2.5, py: 1.5, display: 'flex', alignItems: 'center', gap: 1,
+            ...(updatesNeeded > 0 ? { borderColor: 'warning.main' } : {}),
+          }}
+        >
+          <WarningIcon fontSize="small" color={updatesNeeded > 0 ? 'warning' : 'disabled'} />
+          <Box>
+            <Typography
+              variant="h6"
+              fontWeight={700}
+              lineHeight={1}
+              color={updatesNeeded > 0 ? 'warning.dark' : 'text.primary'}
+            >
+              {updatesNeeded}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">Güncelleme Bekliyor</Typography>
+          </Box>
+        </Paper>
 
-      {tab === 0 && (
-        <SummaryTab mappings={mappings} loading={loadingMappings} />
-      )}
-      {tab === 1 && (
-        <ReleaseTrackingTab mappings={mappings} loading={loadingMappings} />
-      )}
-    </Box>
-  );
-}
-
-function SummaryTab({ mappings, loading }: { mappings: CustomerProductMapping[]; loading: boolean }) {
-  if (loading) return <Box display="flex" justifyContent="center" py={6}><CircularProgress /></Box>;
-
-  return (
-    <TableContainer component={Paper} variant="outlined">
-      <Table size="small">
-        <TableHead>
-          <TableRow sx={{ bgcolor: 'action.hover' }}>
-            <TableCell>Ürün</TableCell>
-            <TableCell>Müşteri Versiyonu</TableCell>
-            <TableCell>Aşama</TableCell>
-            <TableCell>Branch</TableCell>
-            <TableCell>Ortam</TableCell>
-            <TableCell>Durum</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {mappings.map((m) => {
-            const isProduction = m.productVersion.phase === 'PRODUCTION';
-            return (
-              <TableRow key={m.id} hover>
-                <TableCell>
-                  <Typography variant="body2" fontWeight={500}>
-                    {m.productVersion.product.name}
-                  </Typography>
-                </TableCell>
-                <TableCell>
-                  <Typography variant="body2" fontFamily="monospace">
-                    {m.productVersion.version}
-                  </Typography>
-                </TableCell>
-                <TableCell>
-                  <Chip size="small" label={m.productVersion.phase} color={phaseColor(m.productVersion.phase)} />
-                </TableCell>
-                <TableCell>
-                  <Typography variant="body2" color="text.secondary">{m.branch ?? '-'}</Typography>
-                </TableCell>
-                <TableCell>
-                  <Typography variant="body2" color="text.secondary">{m.environment ?? '-'}</Typography>
-                </TableCell>
-                <TableCell>
-                  {isProduction ? (
-                    <Chip
-                      size="small"
-                      icon={<CheckCircleIcon fontSize="small" />}
-                      label="Güncel"
-                      color="success"
-                      variant="outlined"
-                    />
-                  ) : (
-                    <Chip
-                      size="small"
-                      icon={<WarningIcon fontSize="small" />}
-                      label="Güncelleme var"
-                      color="warning"
-                      variant="outlined"
-                    />
-                  )}
-                </TableCell>
-              </TableRow>
-            );
-          })}
-          {mappings.length === 0 && (
-            <TableRow>
-              <TableCell colSpan={6} align="center" sx={{ py: 4, color: 'text.secondary' }}>
-                Ürün eşleştirmesi bulunamadı
-              </TableCell>
-            </TableRow>
-          )}
-        </TableBody>
-      </Table>
-    </TableContainer>
-  );
-}
-
-function ReleaseTrackingTab({ mappings, loading }: { mappings: CustomerProductMapping[]; loading: boolean }) {
-  if (loading) return <Box display="flex" justifyContent="center" py={6}><CircularProgress /></Box>;
-
-  return (
-    <Stack spacing={3}>
-      {mappings.map((m) => {
-        const phaseIdx = PHASE_ORDER.indexOf(m.productVersion.phase);
-        const progress = Math.round((phaseIdx / (PHASE_ORDER.length - 1)) * 100);
-
-        return (
-          <Paper key={m.id} variant="outlined" sx={{ p: 2 }}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
-              <Typography variant="subtitle1" fontWeight={600}>
-                {m.productVersion.product.name}
-              </Typography>
-              <Stack direction="row" spacing={1} alignItems="center">
-                <Typography variant="body2" fontFamily="monospace" color="text.secondary">
-                  {m.productVersion.version}
-                </Typography>
-                <Chip size="small" label={m.productVersion.phase} color={phaseColor(m.productVersion.phase)} />
-              </Stack>
-            </Stack>
-
-            <LinearProgress
-              variant="determinate"
-              value={progress}
-              sx={{ height: 8, borderRadius: 1, mb: 1 }}
-              color={m.productVersion.phase === 'PRODUCTION' ? 'success' : 'primary'}
-            />
-
-            <Stack direction="row" justifyContent="space-between">
-              <Typography variant="caption" color="text.secondary">
-                {PHASE_ORDER[0]}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {m.productVersion.phase} ({progress}%)
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {m.productVersion.targetDate
-                  ? `Hedef: ${new Date(m.productVersion.targetDate).toLocaleDateString('tr-TR')}`
-                  : 'Hedef tarih yok'}
-              </Typography>
-            </Stack>
+        {openIssues > 0 && (
+          <Paper
+            variant="outlined"
+            sx={{ px: 2.5, py: 1.5, display: 'flex', alignItems: 'center', gap: 1, borderColor: 'error.main' }}
+          >
+            <Box>
+              <Typography variant="h6" fontWeight={700} lineHeight={1} color="error.dark">{openIssues}</Typography>
+              <Typography variant="caption" color="text.secondary">Açık Sorun</Typography>
+            </Box>
           </Paper>
-        );
-      })}
+        )}
+      </Stack>
 
-      {mappings.length === 0 && (
-        <Typography color="text.secondary" align="center">
-          Release takibi için ürün eşleştirmesi bulunamadı
-        </Typography>
+      {/* Section label */}
+      <Typography
+        variant="caption"
+        fontWeight={700}
+        color="text.secondary"
+        sx={{ textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', mb: 2 }}
+      >
+        Ürünler
+      </Typography>
+
+      {/* Product cards */}
+      {productMappings.length === 0 ? (
+        <Paper variant="outlined" sx={{ p: 4, textAlign: 'center' }}>
+          <Typography color="text.secondary">
+            Bu müşteriye henüz ürün atanmamış. Müşteri Yönetimi üzerinden ürün ekleyebilirsiniz.
+          </Typography>
+        </Paper>
+      ) : (
+        <Grid container spacing={2}>
+          {productMappings.map((mapping) => (
+            <Grid key={mapping.id} size={{ xs: 12, sm: 6, lg: 4 }}>
+              <ProductCard
+                mapping={mapping}
+                onNavigate={handleViewVersions}
+              />
+            </Grid>
+          ))}
+        </Grid>
       )}
-    </Stack>
+
+      {/* Toast */}
+      <Snackbar
+        open={!!toast}
+        autoHideDuration={4000}
+        onClose={() => setToast(null)}
+        message={toast}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      />
+    </Box>
   );
 }

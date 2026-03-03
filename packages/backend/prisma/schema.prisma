@@ -18,29 +18,52 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  productAccess UserProductAccess[]
+
   @@map("users")
 }
 
 model Product {
-  id                  String           @id @default(uuid())
-  name                String
-  description         String?
-  repoUrl             String?
-  isActive            Boolean          @default(true)
-  createdAt           DateTime         @default(now())
-  updatedAt           DateTime         @updatedAt
-  deploymentType      String?
-  serviceImageName    String?
-  azureOrg            String?
-  azurePat            String?
-  azureProject        String?
-  pmType              String?
-  azureReleaseProject String?
-  apis                Api[]
-  moduleGroups        ModuleGroup[]
-  modules             Module[]
-  versions            ProductVersion[]
-  services            Service[]
+  id                      String           @id @default(uuid())
+  name                    String
+  description             String?
+  isActive                Boolean          @default(true)
+  createdAt               DateTime         @default(now())
+  updatedAt               DateTime         @updatedAt
+
+  // ── Source Control Config ──
+  sourceControlType       String?          // AZURE | GITHUB  (eski: pmType)
+  azureOrg                String?
+  azurePat                String?          // AES-256-GCM encrypted
+  azureProject            String?
+  azureReleaseProject     String?
+  githubOwner             String?
+  githubToken             String?          // AES-256-GCM encrypted
+
+  // ── Artifact & Branching ──
+  supportedArtifactTypes  String[]         @default([])   // DOCKER | BINARY | GIT_SYNC
+  usesReleaseBranches     Boolean          @default(false)
+  concurrentUpdatePolicy  String?          // WARN | BLOCK
+
+  // ── Visibility ──
+  customerVisibleStatuses String[]         @default(["RELEASED"])
+
+  // ── Deprecated (Faz 1 migration — kaldırılacak) ──
+  repoUrl                 String?          // @deprecated — artık azureOrg+project+repoName ile hesaplanır
+  deploymentType          String?          // @deprecated — supportedArtifactTypes[] ile değiştirildi
+  serviceImageName        String?          // @deprecated — Service.dockerImageName'e taşındı
+  pmType                  String?          // @deprecated — sourceControlType ile değiştirildi
+
+  // ── Relations ──
+  apis                    Api[]
+  moduleGroups            ModuleGroup[]
+  modules                 Module[]
+  versions                ProductVersion[]
+  services                Service[]
+  userAccess              UserProductAccess[]
+  metricSnapshots         MetricSnapshot[]
+  environments            Environment[]
+  cpmDirect               CustomerProductMapping[] @relation("CpmProduct")
 
   @@map("products")
 }
@@ -50,20 +73,54 @@ model Service {
   productId               String
   name                    String
   description             String?
-  repoUrl                 String?
   port                    Int?
   isActive                Boolean                  @default(true)
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
-  currentVersion          String?
-  currentVersionCreatedAt DateTime?
+
+  // ── Module ──
+  moduleId                String?                  // hedef: NOT NULL — mevcut veriler taşındıktan sonra zorunlu yapılacak
+
+  // ── Repo & Pipeline ──
+  repoName                String?
   pipelineName            String?
   releaseName             String?
-  repoName                String?
-  serviceImageName        String?
-  moduleId                String?
-  releaseStage            String?
-  lastReleaseName         String?
+  releaseProject          String?                  // override: release ayrı Azure DevOps project'teyse (product.azureProject fallback korunur)
+
+  // ── Stage Config (ikili stage) ──
+  prodStageName           String?
+  prepStageName           String?
+  prodStageId             String?
+  prepStageId             String?
+
+  // ── Release Tracking ──
+  lastProdReleaseName     String?
+  lastProdReleaseDate     DateTime?
+  lastPrepReleaseName     String?
+  lastPrepReleaseDate     DateTime?
+
+  // ── Docker (koşullu: DOCKER artifact) ──
+  dockerImageName         String?                  // eski: serviceImageName
+  containerPlatform       String?                  // RANCHER | OPENSHIFT | KUBERNETES | DOCKER_COMPOSE
+  platformUrl             String?
+  platformToken           String?                  // AES-256-GCM encrypted
+  clusterName             String?
+  namespace               String?
+  workloadName            String?
+
+  // ── Binary (koşullu: BINARY artifact) ──
+  binaryArtifacts         String[]                 @default([])
+  deploymentTargets       Json?                    // [{env, server, path}]
+
+  // ── Deprecated (Faz 1 migration — kaldırılacak) ──
+  repoUrl                 String?                  // @deprecated — azureOrg+project+repoName ile hesaplanır
+  serviceImageName        String?                  // @deprecated — dockerImageName ile değiştirildi
+  currentVersion          String?                  // @deprecated — lastProdReleaseName ile değiştirildi
+  currentVersionCreatedAt DateTime?                // @deprecated — lastProdReleaseDate ile değiştirildi
+  releaseStage            String?                  // @deprecated — prodStageName + prepStageName ile değiştirildi
+  lastReleaseName         String?                  // @deprecated — lastProdReleaseName ile netleştirildi
+
+  // ── Relations ──
   releaseSnapshots        ServiceReleaseSnapshot[]
   module                  Module?                  @relation(fields: [moduleId], references: [id])
   product                 Product                  @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -131,13 +188,29 @@ model ProductVersion {
   masterStartDate  DateTime?
   preProdDate      DateTime?
   testDate         DateTime?
+  deprecatedAt     DateTime?
+  actualReleaseDate DateTime?                      // gerçek yayınlanma tarihi (RELEASED geçişinde set edilir)
+  gitSyncRef       String?                        // branch name veya tag name
+  gitSyncRefType   String?                        // BRANCH | TAG
+  riskLevel        String?                        // LOW | MEDIUM | HIGH | CRITICAL
+  rollbackPlan     String?                        // serbest metin rollback adımları
+  commitCount      Int?                           // bu versiyondaki toplam commit sayısı (MCP'den doldurulur)
   customerMappings CustomerProductMapping[]
   hotfixRequests   HotfixRequest[]
+  fromTransitions  CustomerVersionTransition[] @relation("fromTransitions")
+  toTransitions    CustomerVersionTransition[] @relation("toTransitions")
+  todoCompletions  CustomerTodoCompletion[]
   product          Product                  @relation(fields: [productId], references: [id], onDelete: Cascade)
   releaseNotes     ReleaseNote[]
   releaseTodos     ReleaseTodo[]
   serviceSnapshots ServiceReleaseSnapshot[]
   systemChanges    SystemChange[]
+  versionPackages  VersionPackage[]
+  transitionIssues TransitionIssue[]
+  urgentChanges    UrgentChange[]
+  approvalLogs     ApprovalLog[]
+  healthChecks     HealthCheck[]
+  currentForMappings CustomerProductMapping[] @relation("CpmCurrentVersion")
 
   @@unique([productId, version])
   @@map("product_versions")
@@ -163,12 +236,14 @@ model ReleaseNote {
 model SystemChange {
   id               String          @id @default(uuid())
   productVersionId String?
-  apiPath          String?
-  changeType       String
+  workitemId       String?         // WI ID — MCP'den otomatik doldurulur
+  source           String          @default("MANUAL")  // MANUAL | MCP
+  apiPath          String?         // Örn: "POST /api/auth/login" veya "ClassName.methodName"
+  changeType       String          // FEATURE | BREAKING | BUG_FIX | PERFORMANCE | SECURITY
   title            String
   description      String?
-  previousValue    String?
-  newValue         String?
+  previousValue    String?         // Önceki imza / response yapısı
+  newValue         String?         // Yeni imza / response yapısı
   isBreaking       Boolean         @default(false)
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
@@ -191,13 +266,37 @@ model Customer {
   approverEmails       String[]                 @default([])
   azureReleaseTemplate String?
   devOpsEmails         String[]                 @default([])
-  emailDomain          String?
+  emailDomain          String?                  // @deprecated — use emailDomains[]
+  emailDomains         String[]                 @default([])
   environments         String[]                 @default([])
   supportSuffix        String?
-  tenantName           String?
+  tenantName           String   @default("")   // NOT NULL — boş string yerine gerçek değer zorunlu
+
+  // ── Ticket Platform ──
+  ticketPlatform       String?                  // AZURE | GITHUB | JIRA | NONE
+  ticketBaseUrl        String?
+  ticketApiToken       String?                  // AES-256-GCM encrypted
+  ticketProjectKey     String?
+
+  // ── Azure Ticket Targets ──
+  azureTargetAreaPath      String?
+  azureTargetIterationPath String?
+  azureTargetWorkItemType  String?              // default: "Task"
+  azureTargetTags          String[]             @default([])
+
+  // ── GitHub Ticket Targets ──
+  githubTargetRepo        String?
+  githubTargetLabels      String[]                 @default([])
+  githubTargetProjectId   String?                  // GitHub Projects v2 project ID
+  githubTargetMilestone   String?                  // milestone title
+
   branches             CustomerBranch[]
   productMappings      CustomerProductMapping[]
   serviceMappings      CustomerServiceMapping[]
+  versionTransitions   CustomerVersionTransition[]
+  transitionIssues     TransitionIssue[]
+  todoCompletions      CustomerTodoCompletion[]
+  customerUsers        CustomerUser[]
 
   @@map("customers")
 }
@@ -209,10 +308,41 @@ model CustomerProductMapping {
   branch           String?
   environment      String?
   notes            String?
+  isActive         Boolean        @default(true)
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
-  customer         Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  productVersion   ProductVersion @relation(fields: [productVersionId], references: [id])
+
+  // ── Subscription ──
+  subscriptionLevel        String?              // FULL | MODULE_GROUP | MODULE | SERVICE
+  subscribedModuleGroupIds String[]             @default([])
+  subscribedModuleIds      String[]             @default([])
+  subscribedServiceIds     String[]             @default([])
+
+  // ── Artifact & Deployment ──
+  artifactType     String?                      // DOCKER | BINARY | GIT_SYNC
+  deploymentModel  String?                      // SAAS | ON_PREM
+  hostingType      String?                      // IAAS | SELF_HOSTED
+
+  // ── Helm (koşullu: DOCKER artifact + ON_PREM) ──
+  helmChartTemplateName String?
+  helmValuesOverrides   Json?
+  helmRepoUrl           String?
+
+  // ── Deployment Environments ──
+  environments     String[]                     @default([])
+
+  // ── Sync Tracking ──
+  lastSyncDate     DateTime?
+  lastSyncRef      String?
+
+  // ── yeni FK: Customer → Product (productVersionId deprecated) ──
+  productId        String?                      // hedef: CPM Product'a bağlı, specific version currentVersionId ile
+  currentVersionId String?                      // müşterinin şu an çalıştığı versiyon
+
+  customer         Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  productVersion   ProductVersion  @relation(fields: [productVersionId], references: [id])
+  product          Product?        @relation("CpmProduct", fields: [productId], references: [id])
+  currentVersion   ProductVersion? @relation("CpmCurrentVersion", fields: [currentVersionId], references: [id])
 
   @@unique([customerId, productVersionId])
   @@map("customer_product_mappings")
@@ -248,6 +378,29 @@ model CustomerBranch {
   syncHistory SyncHistory[]
 
   @@map("customer_branches")
+}
+
+model CustomerVersionTransition {
+  id             String          @id @default(uuid())
+  customerId     String
+  fromVersionId  String?
+  toVersionId    String
+  environment    String          @default("PROD")   // TEST | PRE_PROD | PROD
+  status         String          @default("PLANNED") // PLANNED | COMPLETED | CANCELLED
+  plannedDate    DateTime?
+  actualDate     DateTime?
+  transitionDate DateTime        @default(now())
+  notes          String?
+  createdBy      String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  customer    Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  fromVersion ProductVersion? @relation("fromTransitions", fields: [fromVersionId], references: [id])
+  toVersion   ProductVersion  @relation("toTransitions", fields: [toVersionId], references: [id])
+
+  @@unique([customerId, toVersionId, environment])
+  @@map("customer_version_transitions")
 }
 
 model SyncHistory {
@@ -289,6 +442,17 @@ model HotfixRequest {
   @@map("hotfix_requests")
 }
 
+model TodoTemplate {
+  id          String        @id @default(uuid())
+  name        String
+  description String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  items       ReleaseTodo[]
+
+  @@map("todo_templates")
+}
+
 model ReleaseTodo {
   id               String          @id @default(uuid())
   productVersionId String?
@@ -306,8 +470,31 @@ model ReleaseTodo {
   updatedAt        DateTime        @updatedAt
   timing           String          @default("PRE")
   productVersion   ProductVersion? @relation(fields: [productVersionId], references: [id])
+  todoTemplate     TodoTemplate?   @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  todoCompletions  CustomerTodoCompletion[]
 
   @@map("release_todos")
+}
+
+model CustomerTodoCompletion {
+  id          String    @id @default(uuid())
+  todoId      String
+  customerId  String
+  versionId   String
+  completed   Boolean   @default(false)
+  completedAt DateTime?
+  completedBy String?
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  todo     ReleaseTodo    @relation(fields: [todoId], references: [id], onDelete: Cascade)
+  customer Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  version  ProductVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@unique([todoId, customerId, versionId])
+  @@index([customerId, versionId])
+  @@map("customer_todo_completions")
 }
 
 model ServiceReleaseSnapshot {
@@ -327,20 +514,51 @@ model ServiceReleaseSnapshot {
   @@map("service_release_snapshots")
 }
 
+model VersionPackage {
+  id               String         @id @default(uuid())
+  productVersionId String
+  packageType      String         // HELM_CHART | DOCKER_IMAGE | BINARY | GIT_ARCHIVE
+  name             String
+  version          String
+  description      String?
+  artifactUrl      String?
+  helmRepoUrl      String?
+  helmChartName    String?
+  imageRegistry    String?
+  imageName        String?
+  imageTag         String?
+  sizeBytes        BigInt?
+  checksum         String?        // SHA-256
+  downloadCount    Int            @default(0)
+  lastDownloadedAt DateTime?
+  publishedBy      String?
+  publishedAt      DateTime       @default(now())
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  productVersion   ProductVersion @relation(fields: [productVersionId], references: [id], onDelete: Cascade)
+
+  @@index([productVersionId])
+  @@map("version_packages")
+}
+
 model UrgentChange {
-  id               String    @id @default(uuid())
-  title            String
-  description      String
-  priority         String    @default("MEDIUM")
-  status           String    @default("OPEN")
-  affectedProducts Json?
-  workaroundExists Boolean   @default(false)
-  customerImpact   String?
-  requestedBy      String
-  comments         Json?
-  resolvedAt       DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id                String    @id @default(uuid())
+  title             String
+  description       String
+  priority          String    @default("MEDIUM")
+  status            String    @default("OPEN")
+  affectedProducts  Json?
+  affectedCustomers String[]  @default([])        // customerId listesi
+  workaroundExists  Boolean   @default(false)
+  customerImpact    String?
+  requestedBy       String
+  comments          Json?
+  resolvedAt        DateTime?
+  releaseId         String?                       // bağlı ProductVersion id
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  release           ProductVersion? @relation(fields: [releaseId], references: [id])
 
   @@map("urgent_changes")
 }
@@ -385,3 +603,396 @@ model Setting {
 
   @@map("settings")
 }
+
+// ── Faz 6: Transition Issues / Hata Bildir ────────────────────────────────────
+
+enum IssueStatus {
+  OPEN
+  ACKNOWLEDGED
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum IssuePriority {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+model TransitionIssue {
+  id               String        @id @default(uuid())
+  title            String
+  description      String
+  status           IssueStatus   @default(OPEN)
+  priority         IssuePriority @default(MEDIUM)
+  category         String?
+  module           String?
+  steps            String?
+  // Reporter
+  reportedById     String?
+  reportedByName   String?
+  // Assignment
+  assignedTo       String?
+  // Links
+  customerId       String?
+  productVersionId String?
+  // Resolution
+  resolvedAt       DateTime?
+  closedAt         DateTime?
+  resolution       String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  customer        Customer?        @relation(fields: [customerId], references: [id])
+  productVersion  ProductVersion?  @relation(fields: [productVersionId], references: [id])
+  comments        IssueComment[]
+  attachments     IssueAttachment[]
+
+  @@index([status])
+  @@index([customerId])
+  @@index([productVersionId])
+  @@map("transition_issues")
+}
+
+model IssueComment {
+  id        String   @id @default(uuid())
+  issueId   String
+  authorId  String?
+  authorName String
+  body      String
+  createdAt DateTime @default(now())
+
+  issue TransitionIssue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+
+  @@index([issueId])
+  @@map("issue_comments")
+}
+
+model IssueAttachment {
+  id         String   @id @default(uuid())
+  issueId    String
+  filename   String
+  mimeType   String?
+  sizeBytes  Int?
+  url        String
+  uploadedBy String?
+  createdAt  DateTime @default(now())
+
+  issue TransitionIssue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+
+  @@index([issueId])
+  @@map("issue_attachments")
+}
+
+// ── Faz 7: RBAC genişletme ────────────────────────────────────────────────────
+
+enum OrgRole {
+  ADMIN
+  RELEASE_MANAGER
+  DEVELOPER
+  QA
+  VIEWER
+}
+
+enum CustomerRole {
+  CONTACT
+  VIEWER
+  ADMIN
+}
+
+model UserProductAccess {
+  id        String  @id @default(uuid())
+  userId    String
+  productId String
+  canWrite  Boolean @default(false)
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+  @@map("user_product_access")
+}
+
+model CustomerUser {
+  id           String       @id @default(uuid())
+  customerId   String
+  email        String
+  name         String
+  role         CustomerRole @default(VIEWER)
+  passwordHash String?
+  isActive     Boolean      @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, email])
+  @@index([email])
+  @@map("customer_users")
+}
+
+// ── Faz 8: DORA + Dashboard Metrikleri ───────────────────────────────────────
+
+model MetricSnapshot {
+  id            String   @id @default(uuid())
+  period        String   // e.g. "2026-03", "2026-Q1"
+  periodType    String   // "MONTH" | "QUARTER" | "WEEK"
+  productId     String?
+  // DORA metrics
+  deployFreq    Float?   // deployments per day
+  leadTimeDays  Float?   // avg lead time in days
+  changeFailRate Float?  // 0.0 - 1.0
+  mttrHours     Float?   // mean time to recover in hours
+  // Release ops
+  releasesTotal Int?
+  bugsReported  Int?
+  bugsResolved  Int?
+  p0Count       Int?
+  // Awareness
+  customersOnLatest Int?
+  customersTotal    Int?
+  computedAt    DateTime @default(now())
+
+  product Product? @relation(fields: [productId], references: [id])
+
+  @@index([period, productId])
+  @@map("metric_snapshots")
+}
+
+// ── Faz 9: Environment Entity (Product seviyesinde ortam tanımı) ──────────────
+
+model Environment {
+  id          String   @id @default(uuid())
+  productId   String
+  name        String   // "PREP", "PROD", "TEST", "DEV"
+  type        String   // PREP | PROD | TEST | DEV
+  description String?
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, name])
+  @@map("environments")
+}
+
+// ── Faz 10: Ticket Mapping (duplicate önleme) ─────────────────────────────────
+
+model TicketMapping {
+  id                 String   @id @default(uuid())
+  customerId         String
+  sourceTicketId     String   // kaynak platform ticket ID
+  sourcePlatform     String   // ZENDESK | JIRA | GITHUB
+  targetTicketId     String?  // hedef platform ticket ID
+  targetPlatform     String   // AZURE | GITHUB
+  productVersionId   String?
+  syncStatus         String   @default("PENDING") // PENDING | SYNCED | FAILED
+  lastSyncedAt       DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([customerId, sourceTicketId, sourcePlatform])
+  @@index([customerId])
+  @@map("ticket_mappings")
+}
+
+// ── Faz 11: HealthCheck modelleri ────────────────────────────────────────────
+
+model HealthCheckTemplate {
+  id          String   @id @default(uuid())
+  productId   String?  // null = global template
+  name        String
+  description String?
+  isDefault   Boolean  @default(false)
+  items       Json     // [{title, category, weight, required}]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("health_check_templates")
+}
+
+model HealthCheck {
+  id               String    @id @default(uuid())
+  productVersionId String
+  templateId       String?
+  healthScore      Int       @default(0)   // 0-100
+  riskLevel        String    @default("MEDIUM") // LOW | MEDIUM | HIGH | CRITICAL
+  commitCount      Int?
+  commitAnalysis   Json?     // {totalAuthors, topFiles, breakingChangeCount}
+  status           String    @default("DRAFT") // DRAFT | IN_REVIEW | APPROVED | REJECTED
+  reviewedBy       String?
+  reviewedAt       DateTime?
+  notes            String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  productVersion   ProductVersion @relation(fields: [productVersionId], references: [id], onDelete: Cascade)
+  items            HealthCheckItem[]
+  dependencyItems  DependencyHealth[]
+
+  @@index([productVersionId])
+  @@map("health_checks")
+}
+
+model HealthCheckItem {
+  id             String   @id @default(uuid())
+  healthCheckId  String
+  category       String   // TECHNICAL | PROCESS | DEPENDENCY | COMPLIANCE
+  title          String
+  description    String?
+  status         String   @default("PENDING") // PENDING | PASS | FAIL | NA
+  weight         Int      @default(1)          // ağırlık (skor hesabında kullanılır)
+  isRequired     Boolean  @default(false)
+  completedBy    String?
+  completedAt    DateTime?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  healthCheck HealthCheck @relation(fields: [healthCheckId], references: [id], onDelete: Cascade)
+
+  @@index([healthCheckId])
+  @@map("health_check_items")
+}
+
+model DependencyHealth {
+  id              String   @id @default(uuid())
+  healthCheckId   String
+  dependencyName  String
+  dependencyType  String   // SERVICE | LIBRARY | API | DATABASE
+  currentVersion  String?
+  requiredVersion String?
+  status          String   @default("UNKNOWN") // HEALTHY | DEGRADED | DOWN | UNKNOWN
+  notes           String?
+  checkedAt       DateTime?
+  createdAt       DateTime @default(now())
+
+  healthCheck HealthCheck @relation(fields: [healthCheckId], references: [id], onDelete: Cascade)
+
+  @@index([healthCheckId])
+  @@map("dependency_health")
+}
+
+// ── Faz 12: Onay Akışı + Gating Rules ────────────────────────────────────────
+
+model ApprovalLog {
+  id               String   @id @default(uuid())
+  productVersionId String
+  approvedBy       String
+  approverRole     String?
+  approvalType     String   // GATE_APPROVE | GATE_REJECT | DEPLOY_APPROVE | REVERT
+  comment          String?
+  metadata         Json?
+  createdAt        DateTime @default(now())
+
+  productVersion ProductVersion @relation(fields: [productVersionId], references: [id], onDelete: Cascade)
+
+  @@index([productVersionId])
+  @@map("approval_logs")
+}
+
+model ReleaseGatingRule {
+  id          String   @id @default(uuid())
+  productId   String?  // null = global kural
+  name        String
+  description String?
+  ruleType    String   // HEALTH_SCORE_MIN | TODO_COMPLETION | APPROVAL_COUNT | CUSTOM
+  parameters  Json     // {"minScore": 80} veya {"count": 2} vs.
+  isActive    Boolean  @default(true)
+  blockLevel  String   @default("WARN") // WARN | BLOCK
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("release_gating_rules")
+}
+
+// ── Faz 13: ServiceVersion Matrix ────────────────────────────────────────────
+
+model ServiceVersion {
+  id                    String   @id @default(uuid())
+  serviceId             String
+  productVersionId      String   // hangi ürün sürümünde
+  prodVersion           String?  // canlıdaki sürüm (release adı veya image tag)
+  prepVersion           String?  // hazırlık ortamındaki sürüm
+  currentReleaseId      String?  // son release snapshot id
+  isStale               Boolean  @default(false)
+  staleThresholdDays    Int?     // kaç günden büyükse eski sayılır
+  lastCheckedAt         DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([serviceId, productVersionId])
+  @@index([serviceId])
+  @@map("service_versions")
+}
+
+// ── Faz 14: RBAC — Role + AuditLog + SSO + Session + 2FA ────────────────────
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  userEmail  String?
+  action     String   // e.g. "user.create", "product.delete", "role.assign"
+  resource   String?  // e.g. "Product", "Customer"
+  resourceId String?
+  oldValue   Json?
+  newValue   Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt(sort: Desc)])
+  @@map("audit_logs")
+}
+
+model SsoConfig {
+  id           String   @id @default(uuid())
+  provider     String   // AZURE_AD | OKTA | GOOGLE | SAML
+  clientId     String
+  clientSecret String   // encrypted
+  tenantId     String?
+  domain       String?
+  redirectUri  String?
+  isActive     Boolean  @default(false)
+  metadata     Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("sso_configs")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String?
+  token     String   @unique
+  expiresAt DateTime
+  isRevoked Boolean  @default(false)
+  userAgent String?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@index([token])
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model TwoFactorConfig {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  isEnabled   Boolean  @default(false)
+  secret      String?  // TOTP secret (encrypted)
+  backupCodes Json?    // hashed backup codes
+  enabledAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("two_factor_configs")
+}
+

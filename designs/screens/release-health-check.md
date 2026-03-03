@@ -178,16 +178,57 @@ MUI Accordion (ModuleGroup, koyu başlık)
 | Kolon | Tür | Açıklama |
 |---|---|---|
 | Servis Adı | `Chip color="primary" variant="outlined"` | `repoName` veya `name` |
-| Katalog Versiyonu | `Typography fontFamily="monospace"` | DB'deki `currentVersion` |
-| Son Release | `Typography variant="body2"` | `releaseName · X gün önce` — snapshot'tan gelir |
+| Katalog Versiyonu | `Typography fontFamily="monospace"` | DB'deki `lastProdReleaseName` |
+| Son Prep Release | `Typography variant="body2"` | `lastPrepReleaseName` — DB'den gelir (Azure'dan değil) |
+| Son Prep Tarihi | `Typography variant="caption" color="text.secondary"` | `lastPrepReleaseDate` — `DD Ay YYYY, HH:mm` formatında; null ise `—` |
 | Yeni PR'lar | `Chip size="small"` | Yeşil "Değişiklik yok" / Mavi "N yeni PR" / Gri "Hiç yayınlanmadı" |
+| Güncelle | `IconButton size="small"` | 🔄 simgesi — servis bazlı prep refresh |
 
-**Son Release Kolon Davranışı:**
+**Son Prep Release & Tarih Kolon Davranışı:**
 
-| Durum | Gösterim |
+Veri kaynağı: **DB** (`services.lastPrepReleaseName` + `services.lastPrepReleaseDate`). Azure'a gerçek zamanlı istek atılmaz — sadece kullanıcı 🔄 butonuna basınca güncellenir.
+
+| Koşul | Gösterim |
 |---|---|
-| Snapshot var | `Release-47 · 3 gün önce` (releaseName + göreceli tarih) |
-| Snapshot yok | `—` + sarı uyarı tooltip: "Bu servis için henüz release kaydı yok — PR geçmişi tahmini gösteriliyor" |
+| `lastPrepReleaseName` dolu | Release adı (`fontFamily: monospace`) |
+| `lastPrepReleaseName` null | `—` |
+| `lastPrepReleaseDate` dolu | `DD Ay YYYY, HH:mm` — örn. `23 Şub 2026, 14:35` |
+| `lastPrepReleaseDate` null | `—` |
+
+**🔄 Servis Satırı Refresh Butonu:**
+
+Her servis satırının sonundaki `IconButton` (🔄):
+
+```
+1. Kullanıcı 🔄 'a basar
+2. Buton spinner'a döner, disabled
+3. Backend: GET /api/tfs/last-prep-releases?productId=X&serviceId=Y
+4. Backend Azure'dan release adı + tarihi alır
+5. Backend: PATCH /api/services/:id { lastPrepReleaseName, lastPrepReleaseDate }
+6. Frontend: query invalidate → satır güncellenir
+7. Spinner biter, buton tekrar aktif
+8. Hata: satır altında inline mini Alert (error)
+```
+
+Alt endpoint notu: frontend doğrudan `PATCH /api/services/:id` yazmaz — `POST /api/tfs/refresh-prep-release?productId=X&serviceId=Y` tek çağrısı hem Azure'u çeker hem DB'ye yazar. Bu proxy yaklaşımı, frontend'in Azure PAT'ını bilmesine gerek kalmamasını sağlar.
+
+**Section Header — Tümünü Yenile:**
+
+Section başlık satırına `IconButton` (🔄 + "Tümünü Yenile" tooltip) eklenir. Tıklandığında:
+- `releaseName` dolu olan tüm servisler için sırayla (ard arda) refresh çağrısı yapılır
+- Her servis sonucu bağımsız — biri hata verse diğerleri devam eder
+- Section header'da `LinearProgress` gösterir (kaçıncı / kaç tane)
+- Bitince: başarı/hata özeti `Tooltip` veya `Snackbar` ile
+
+**Prep Fetch Mantığı (değişmedi):**
+
+| Konfigürasyon | Azure Sorgusu | Kaydedilen |
+|---|---|---|
+| `releaseName` dolu + `prepStageName` dolu | VSRM → `prepStageName` environment'ı `succeeded` olan en son release + `createdOn` | `lastPrepReleaseName` + `lastPrepReleaseDate` |
+| `releaseName` dolu + `prepStageName` boş/null | VSRM → en son tetiklenen release (`$top=1`) + `createdOn` | `lastPrepReleaseName` + `lastPrepReleaseDate` |
+| `releaseName` boş | Atlanır | — |
+
+> **İş kuralı:** Prep bilgisi artık DB'ye kaydedilir ve sayfa her açılışında Azure çağrısı yapılmaz. Kullanıcı bilinçli "Güncelle" dediğinde Azure sorgusunu tetikler.
 
 **Yeni PR'lar Kolon Davranışı:**
 

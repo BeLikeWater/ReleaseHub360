@@ -3,7 +3,7 @@ import {
   Box, Typography, Button, Chip, FormControl, InputLabel,
   Select, MenuItem, CircularProgress, Alert, Table, TableBody, TableCell,
   TableHead, TableRow, Dialog, DialogTitle, DialogContent, DialogActions,
-  Accordion, AccordionSummary, AccordionDetails, Paper, Checkbox, Skeleton,
+  Accordion, AccordionSummary, AccordionDetails, Paper, Skeleton,
   Tooltip, IconButton, Link, Snackbar, Divider, Popover,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
@@ -13,10 +13,9 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import CancelIcon from '@mui/icons-material/Cancel';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
-import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '@/api/client';
-import { computePhase, phaseLabel } from '@/lib/versionPhase';
+import { PHASE_META } from '@/lib/versionPhase';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -35,8 +34,13 @@ type Version = {
 
 type ServiceRow = {
   id: string; name: string; repoName?: string | null;
-  currentVersion?: string | null; moduleId?: string | null;
-  lastReleaseName?: string | null;
+  lastProdReleaseName?: string | null; // Katalog Versiyonu — ana alan
+  lastProdReleaseDate?: string | null;
+  currentVersion?: string | null;      // @deprecated — fallback olarak korunuyor
+  moduleId?: string | null;
+  lastReleaseName?: string | null;     // Son Release (prep stage) — deprecated, initBaseline ile geliyordu
+  lastPrepReleaseName?: string | null;
+  lastPrepReleaseDate?: string | null;
 };
 
 type ModuleRow = { id: string; name: string; services: ServiceRow[] };
@@ -53,6 +57,7 @@ type PR = {
   title: string;
   status: string;
   sourceBranch?: string;
+  targetRefName?: string;  // e.g. "refs/heads/master"
   creationDate?: string;
   closedDate?: string;
   repository?: { name?: string; webUrl?: string };
@@ -107,6 +112,14 @@ function StatusIcon({ kind }: { kind: StatusKind }) {
 function fmtDate(d?: string | null): string {
   if (!d) return '—';
   return new Date(d).toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' });
+}
+
+function fmtDatetime(d?: string | null): string {
+  if (!d) return '—';
+  return new Date(d).toLocaleString('tr-TR', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
 }
 
 function prStatusColor(status: string): 'warning' | 'success' | 'error' | 'default' {
@@ -200,13 +213,24 @@ function SectionShell({ icon, title, status, statusNote, collapsed, onToggle, he
 
 // ─── SECTION 1 — BoM ──────────────────────────────────────────────────────────
 
-function ServiceTable({ services, deltaMap, isDeltaLoading }: {
+function ServiceTable({ services, deltaMap, isDeltaLoading, productId }: {
   services: ServiceRow[];
   deltaMap: Map<string, PR[]>;
   isDeltaLoading: boolean;
+  productId: string;
 }) {
+  const queryClient = useQueryClient();
   const [popover, setPopover] = useState<{ el: HTMLElement | null; items: { prId: number; title: string; mergeDate: string }[] }>({
     el: null, items: [],
+  });
+  const [refreshingId, setRefreshingId] = useState<string | null>(null);
+
+  const refreshMut = useMutation({
+    mutationFn: (serviceId: string) =>
+      apiClient.post(`/tfs/refresh-prep-release?productId=${productId}&serviceId=${serviceId}`).then(r => r.data),
+    onMutate: (serviceId) => setRefreshingId(serviceId),
+    onSettled: () => setRefreshingId(null),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['product-detail', productId] }),
   });
 
   return (
@@ -216,36 +240,48 @@ function ServiceTable({ services, deltaMap, isDeltaLoading }: {
           <TableRow sx={{ bgcolor: 'grey.50' }}>
             <TableCell sx={{ fontWeight: 600 }}>Servis</TableCell>
             <TableCell sx={{ fontWeight: 600 }}>Katalog Versiyonu</TableCell>
-            <TableCell sx={{ fontWeight: 600 }}>Son Release</TableCell>
+            <TableCell sx={{ fontWeight: 600 }}>Son Prep Release</TableCell>
+            <TableCell sx={{ fontWeight: 600 }}>Son Prep Tarihi</TableCell>
             <TableCell sx={{ fontWeight: 600 }}>Yeni PR'lar</TableCell>
+            <TableCell sx={{ fontWeight: 600, width: 48 }} />
           </TableRow>
         </TableHead>
         <TableBody>
           {services.map(svc => {
             const deltaItems = deltaMap.get(svc.id) ?? [];
             const deltaCount = deltaItems.length;
+            const katalogVer = svc.lastProdReleaseName ?? svc.currentVersion;
+            const lastPrepRelease = svc.lastPrepReleaseName ?? null;
+            const isRefreshing = refreshingId === svc.id;
             return (
               <TableRow key={svc.id} hover>
                 <TableCell>
                   <Chip label={svc.repoName || svc.name} size="small" color="primary" variant="outlined" />
                 </TableCell>
                 <TableCell>
-                  <Typography variant="body2" fontFamily="monospace">{svc.currentVersion || '—'}</Typography>
+                  <Typography variant="body2" fontFamily="monospace">
+                    {katalogVer || '—'}
+                  </Typography>
                 </TableCell>
                 <TableCell>
-                  <Typography variant="body2" color={svc.lastReleaseName ? 'text.secondary' : 'text.disabled'}>
-                    {svc.lastReleaseName ?? '—'}
+                  <Typography variant="body2" color={lastPrepRelease ? 'text.secondary' : 'text.disabled'} fontFamily="monospace">
+                    {lastPrepRelease ?? '—'}
+                  </Typography>
+                </TableCell>
+                <TableCell>
+                  <Typography variant="body2" color="text.secondary">
+                    {fmtDatetime(svc.lastPrepReleaseDate)}
                   </Typography>
                 </TableCell>
                 <TableCell>
                   {isDeltaLoading ? (
                     <Chip label="Yükleniyor..." size="small" color="default" />
-                  ) : !svc.currentVersion || !svc.lastReleaseName ? (
+                  ) : !svc.repoName ? (
+                    <Chip label="Repo tanımsız" size="small" color="default" />
+                  ) : !svc.lastProdReleaseDate ? (
                     <Chip label="Baseline yok" size="small" color="default" />
-                  ) : svc.currentVersion === svc.lastReleaseName ? (
-                    <Chip label="Değişiklik yok" size="small" color="success" />
                   ) : deltaCount === 0 ? (
-                    <Chip label="Delta yok" size="small" color="success" />
+                    <Chip label="Değişiklik yok" size="small" color="success" />
                   ) : (
                     <Chip
                       label={`${deltaCount} yeni PR`} size="small" color="primary"
@@ -254,12 +290,27 @@ function ServiceTable({ services, deltaMap, isDeltaLoading }: {
                         items: deltaItems.map(pr => ({
                           prId: pr.pullRequestId,
                           title: pr.title,
-                          mergeDate: pr.creationDate ?? '',
+                          mergeDate: pr.closedDate ?? pr.creationDate ?? '',
                         })),
                       })}
                       sx={{ cursor: 'pointer' }}
                     />
                   )}
+                </TableCell>
+                <TableCell sx={{ p: 0.5 }}>
+                  <Tooltip title="Prep release'i Azure'dan güncelle">
+                    <span>
+                      <IconButton
+                        size="small"
+                        onClick={() => refreshMut.mutate(svc.id)}
+                        disabled={isRefreshing || refreshMut.isPending}
+                      >
+                        {isRefreshing
+                          ? <CircularProgress size={14} />
+                          : <RefreshIcon fontSize="small" />}
+                      </IconButton>
+                    </span>
+                  </Tooltip>
                 </TableCell>
               </TableRow>
             );
@@ -291,9 +342,10 @@ function ServiceTable({ services, deltaMap, isDeltaLoading }: {
   );
 }
 
-function BomSection({ productId, collapsed, onToggle, onWorkItemsCollected }: {
+function BomSection({ productId, collapsed, onToggle, onWorkItemsCollected, onDeltaPrsCollected }: {
   productId: string; collapsed: boolean; onToggle: () => void;
   onWorkItemsCollected?: (ids: number[]) => void;
+  onDeltaPrsCollected?: (prs: PR[]) => void;
 }) {
   const { data: product, isLoading } = useQuery<ProductDetail>({
     queryKey: ['product-detail', productId],
@@ -302,50 +354,99 @@ function BomSection({ productId, collapsed, onToggle, onWorkItemsCollected }: {
     staleTime: 60_000,
   });
 
-  const { data: deltaResult, isLoading: isDeltaLoading } = useQuery<{ data: { serviceId: string; prs: PR[] }[]; authError?: string }>({
-    queryKey: ['release-delta', productId],
-    queryFn: () => apiClient.get(`/tfs/release-delta?productId=${productId}`).then(r => ({ data: r.data.data, authError: r.data.authError })),
+  // PR'lar: prs-v3 (PrSection ile aynı cache key — Azure'a ekstra istek gitmez)
+  const { data: prsRaw = [], isLoading: isDeltaLoading } = useQuery<PR[]>({
+    queryKey: ['prs-v3', productId],
+    queryFn: () =>
+      apiClient.get(`/tfs/pull-requests?productId=${productId}`)
+        .then(r => { const d = r.data.data ?? r.data; return d.value ?? (Array.isArray(d) ? d : []); }),
     enabled: !!productId,
     staleTime: 60_000,
   });
 
-  const deltaRaw = deltaResult?.data ?? [];
-  const deltaAuthError = deltaResult?.authError;
+  const queryClient = useQueryClient();
+  const batchRefreshMut = useMutation({
+    mutationFn: () => apiClient.post(`/tfs/refresh-prep-release?productId=${productId}`).then(r => r.data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['product-detail', productId] }),
+  });
 
-  const deltaMap = useMemo(
-    () => new Map(deltaRaw.map(d => [d.serviceId, d.prs])),
-    [deltaRaw],
-  );
+  // Tüm servisleri düz liste olarak topla (deltaMap hesabı için)
+  const allServices = useMemo(() => {
+    if (!product) return [] as ServiceRow[];
+    const fromMods = (product.moduleGroups ?? []).flatMap(g => g.modules.flatMap(m => m.services));
+    const modSvcIds = new Set(fromMods.map(s => s.id));
+    return [...fromMods, ...(product.services ?? []).filter(s => !modSvcIds.has(s.id))];
+  }, [product]);
 
-  // Delta PR'lardan tüm benzersiz work item ID'lerini toplayıp üst bileşene bildir
+  // Delta: servis başına, repoName eşleşen + master'a merge edilmiş (completed) +
+  //        closedDate ∈ (lastProdReleaseDate, lastPrepReleaseDate ?? now] olan PR'lar
+  const deltaMap = useMemo(() => {
+    const map = new Map<string, PR[]>();
+    for (const svc of allServices) {
+      // repoName tanımsızsa hangi PR'ın bu servise ait olduğu bilinemez
+      if (!svc.repoName) { map.set(svc.id, []); continue; }
+      // prod tarihi yoksa baseline yok
+      if (!svc.lastProdReleaseDate) { map.set(svc.id, []); continue; }
+      const from = new Date(svc.lastProdReleaseDate).getTime();
+      const to = svc.lastPrepReleaseDate
+        ? new Date(svc.lastPrepReleaseDate).getTime()
+        : Date.now();
+      const repoLower = svc.repoName.toLowerCase();
+      const filtered = prsRaw.filter(pr =>
+        pr.status === 'completed' &&
+        (pr.repository?.name ?? '').toLowerCase() === repoLower &&
+        // master / main branch hedef — targetRefName yoksa tüm branch'ler kabul
+        (!pr.targetRefName ||
+          pr.targetRefName === 'refs/heads/master' ||
+          pr.targetRefName === 'refs/heads/main') &&
+        !!pr.closedDate &&
+        new Date(pr.closedDate).getTime() > from &&
+        new Date(pr.closedDate).getTime() <= to,
+      );
+      map.set(svc.id, filtered);
+    }
+    return map;
+  }, [prsRaw, allServices]);
+
+  // deltaMap'teki PR'lardan work item ID'lerini toplaıp üst bileşene bildir
   useEffect(() => {
+    const allPrs = [...deltaMap.values()].flat();
+    const unique = [...new Map(allPrs.map(p => [p.pullRequestId, p])).values()];
+    if (onDeltaPrsCollected) onDeltaPrsCollected(unique);
     if (!onWorkItemsCollected) return;
-    const ids = deltaRaw
-      .flatMap(d => d.prs.flatMap(pr => (pr.workItemRefs ?? []).map(r => Number(r.id))))
+    const ids = unique
+      .flatMap(pr => (pr.workItemRefs ?? []).map(r => Number(r.id)))
       .filter(n => !isNaN(n) && n > 0);
     onWorkItemsCollected([...new Set(ids)]);
-  }, [deltaRaw, onWorkItemsCollected]);
+  }, [deltaMap, onDeltaPrsCollected, onWorkItemsCollected]);
 
   const allSvcCount = useMemo(() => {
     if (!product) return 0;
-    const fromMods = product.moduleGroups.flatMap(g => g.modules.flatMap(m => m.services));
+    const fromMods = (product.moduleGroups ?? []).flatMap(g => g.modules.flatMap(m => m.services));
     const modSvcIds = new Set(fromMods.map(s => s.id));
-    return fromMods.length + product.services.filter(s => !modSvcIds.has(s.id)).length;
+    return fromMods.length + (product.services ?? []).filter(s => !modSvcIds.has(s.id)).length;
   }, [product]);
 
   const sectionStatus: StatusKind = !product ? 'empty' : allSvcCount === 0 ? 'empty' : 'ok';
-
-  const qc = useQueryClient();
-  const initBaseline = useMutation({
-    mutationFn: () => apiClient.post('/service-release-snapshots/initialize', { productId }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['product-detail', productId] }),
-  });
 
   return (
     <SectionShell icon="📦" title="Servis Versiyonları (BoM)"
       status={sectionStatus}
       statusNote={allSvcCount > 0 ? `${allSvcCount} servis` : ''}
-      collapsed={collapsed} onToggle={onToggle}>
+      collapsed={collapsed} onToggle={onToggle}
+      headerAction={
+        <Tooltip title="Tüm servislerin Prep release bilgisini Azure'dan güncelle">
+          <span>
+            <IconButton
+              size="small"
+              onClick={() => batchRefreshMut.mutate()}
+              disabled={batchRefreshMut.isPending}
+            >
+              {batchRefreshMut.isPending ? <CircularProgress size={16} /> : <RefreshIcon fontSize="small" />}
+            </IconButton>
+          </span>
+        </Tooltip>
+      }>
       {isLoading && (
         <Box>
           <Skeleton variant="rectangular" height={40} sx={{ mb: 1 }} />
@@ -356,28 +457,9 @@ function BomSection({ productId, collapsed, onToggle, onWorkItemsCollected }: {
       {!isLoading && allSvcCount === 0 && (
         <Alert severity="info">Bu ürün için modül veya servis tanımlı değil — Ürün Kataloğu'ndan ekleyin.</Alert>
       )}
-      {deltaAuthError && (
-        <Alert severity="warning" sx={{ mb: 1 }}>
-          <strong>Azure VSRM erişimi engellendi:</strong> {deltaAuthError}
-        </Alert>
-      )}
-      {!isLoading && product && allSvcCount > 0 && (
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={initBaseline.isPending ? <CircularProgress size={14} /> : <CloudDownloadIcon fontSize="small" />}
-            disabled={initBaseline.isPending}
-            onClick={() => initBaseline.mutate()}
-            sx={{ fontWeight: 600 }}
-          >
-            {initBaseline.isPending ? 'Getiriliyor...' : 'Azure Baseline Al'}
-          </Button>
-        </Box>
-      )}
       {!isLoading && product && allSvcCount > 0 && (
         <>
-          {product.moduleGroups.map(group => (
+          {(product.moduleGroups ?? []).map(group => (
             <Accordion key={group.id} defaultExpanded sx={{ mb: 1, '&:before': { display: 'none' } }}>
               <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ bgcolor: 'primary.50', minHeight: 40 }}>
                 <Typography variant="body2" fontWeight={700}>{group.name}</Typography>
@@ -391,22 +473,22 @@ function BomSection({ productId, collapsed, onToggle, onWorkItemsCollected }: {
                     </Typography>
                     {mod.services.length === 0
                       ? <Typography variant="caption" color="text.secondary" sx={{ px: 2, py: 1, display: 'block' }}>Servis yok</Typography>
-                      : <ServiceTable services={mod.services} deltaMap={deltaMap} isDeltaLoading={isDeltaLoading} />}
+                      : <ServiceTable services={mod.services} deltaMap={deltaMap} isDeltaLoading={isDeltaLoading} productId={productId} />}
                   </Box>
                 ))}
               </AccordionDetails>
             </Accordion>
           ))}
           {(() => {
-            const grouped = new Set(product.moduleGroups.flatMap(g => g.modules.flatMap(m => m.services.map(s => s.id))));
-            const ungrouped = product.services.filter(s => !grouped.has(s.id));
+            const grouped = new Set((product.moduleGroups ?? []).flatMap(g => g.modules.flatMap(m => m.services.map(s => s.id))));
+            const ungrouped = (product.services ?? []).filter(s => !grouped.has(s.id));
             if (!ungrouped.length) return null;
             return (
               <Accordion defaultExpanded sx={{ '&:before': { display: 'none' } }}>
                 <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ bgcolor: 'grey.100' }}>
                   <Typography variant="body2" fontWeight={700}>Gruplandırılmamış Servisler</Typography>
                 </AccordionSummary>
-                <AccordionDetails sx={{ p: 0 }}><ServiceTable services={ungrouped} deltaMap={deltaMap} isDeltaLoading={isDeltaLoading} /></AccordionDetails>
+                <AccordionDetails sx={{ p: 0 }}><ServiceTable services={ungrouped} deltaMap={deltaMap} isDeltaLoading={isDeltaLoading} productId={productId} /></AccordionDetails>
               </Accordion>
             );
           })()}
@@ -418,30 +500,43 @@ function BomSection({ productId, collapsed, onToggle, onWorkItemsCollected }: {
 
 // ─── SECTION 2 — Pull Requests ────────────────────────────────────────────────
 
-function PrSection({ productId, pmType, preProdDate, collapsed, onToggle, onWorkItemsCollected }: {
-  productId: string; pmType?: string | null; preProdDate?: string | null;
+function PrSection({ productId, pmType, deltaPRs, collapsed, onToggle, onWorkItemsCollected, onWiToRepoCollected }: {
+  productId: string; pmType?: string | null;
+  deltaPRs?: PR[];          // BoM'dan gelen filtreli PR listesi (master, prod–prep arası)
   collapsed: boolean; onToggle: () => void; onWorkItemsCollected: (ids: number[]) => void;
+  onWiToRepoCollected?: (map: Map<number, string>) => void;
 }) {
   const isAzure = pmType === 'AZURE';
 
-  const { data: rawPRs = [], isLoading, isError, refetch } = useQuery<PR[]>({
+  // Verinin kaynağı: deltaPRs varsa BoM'daki filtreden gelenler, yoksa raw (fallback)
+  const { data: rawPRs = [], isLoading: isRawLoading, isError, refetch } = useQuery<PR[]>({
     queryKey: ['prs-v3', productId],
     queryFn: () => apiClient.get(`/tfs/pull-requests?productId=${productId}`)
       .then(r => { const d = r.data.data ?? r.data; return d.value ?? (Array.isArray(d) ? d : []); }),
-    enabled: !!productId && isAzure,
+    enabled: !!productId && isAzure && !deltaPRs,  // deltaPRs varsa Azure'a istek atmaz
     staleTime: 0, retry: 1,
   });
 
-  const prs = useMemo(() => {
-    if (!preProdDate) return rawPRs;
-    const cutoff = new Date(preProdDate).getTime();
-    return rawPRs.filter(pr => pr.creationDate ? new Date(pr.creationDate).getTime() > cutoff : true);
-  }, [rawPRs, preProdDate]);
+  // deltaPRs prop'u varsa onu kullan; yoksa raw listeden fallback
+  const prs = deltaPRs ?? rawPRs;
+  const isLoading = !deltaPRs && isRawLoading;
 
   useEffect(() => {
     const ids = prs.flatMap(pr => (pr.workItemRefs ?? []).map(r => Number(r.id)).filter(n => !isNaN(n)));
     onWorkItemsCollected([...new Set(ids)]);
-  }, [prs, onWorkItemsCollected]);
+    if (onWiToRepoCollected) {
+      const map = new Map<number, string>();
+      prs.forEach(pr => {
+        const repo = pr.repository?.name ?? '';
+        if (!repo) return;
+        (pr.workItemRefs ?? []).forEach(r => {
+          const id = Number(r.id);
+          if (!isNaN(id)) map.set(id, repo);
+        });
+      });
+      onWiToRepoCollected(map);
+    }
+  }, [prs, onWorkItemsCollected, onWiToRepoCollected]);
 
   const grouped = useMemo(() => {
     const map: Record<string, PR[]> = {};
@@ -459,7 +554,7 @@ function PrSection({ productId, pmType, preProdDate, collapsed, onToggle, onWork
 
   return (
     <SectionShell icon="🔀" title="Pull Requests" status={sectionStatus}
-      statusNote={isAzure && prs.length > 0 ? `Toplam: ${prs.length}  Açık: ${openCount}  Merged: ${mergedCount}` : ''}
+      statusNote={isAzure && prs.length > 0 ? `Prod→Prep delta: ${prs.length} PR  Açık: ${openCount}  Merged: ${mergedCount}` : ''}
       collapsed={collapsed} onToggle={onToggle}>
       {!isAzure && (
         <Alert severity="info">Bu ürün için Azure DevOps yapılandırılmamış. Ürün Kataloğu'ndan yapılandırın.</Alert>
@@ -478,7 +573,9 @@ function PrSection({ productId, pmType, preProdDate, collapsed, onToggle, onWork
       )}
       {isAzure && !isLoading && !isError && prs.length === 0 && (
         <Typography color="text.secondary" variant="body2">
-          {preProdDate ? `${fmtDate(preProdDate)} tarihinden sonra PR bulunamadı.` : 'PR bulunamadı.'}
+          {deltaPRs !== undefined
+            ? 'Bu aralıkta (Prod → Prep) master’a merge edilmiş PR bulunamadı.'
+            : 'PR bulunamadı.'}
         </Typography>
       )}
       {isAzure && !isLoading && !isError && Object.entries(grouped).map(([repo, repoPRs]) => {
@@ -543,8 +640,9 @@ function PrSection({ productId, pmType, preProdDate, collapsed, onToggle, onWork
 
 // ─── SECTION 3 — Work Items ───────────────────────────────────────────────────
 
-function WorkItemsSection({ productId, pmType, workItemIds, collapsed, onToggle }: {
+function WorkItemsSection({ productId, pmType, workItemIds, wiToRepo, collapsed, onToggle }: {
   productId: string; pmType?: string | null; workItemIds: number[];
+  wiToRepo: Map<number, string>;
   collapsed: boolean; onToggle: () => void;
 }) {
   const isAzure = pmType === 'AZURE';
@@ -590,6 +688,7 @@ function WorkItemsSection({ productId, pmType, workItemIds, collapsed, onToggle 
                   <TableCell sx={{ fontWeight: 600 }}>Başlık</TableCell>
                   <TableCell sx={{ fontWeight: 600 }}>Tür</TableCell>
                   <TableCell sx={{ fontWeight: 600 }}>Durum</TableCell>
+                  <TableCell sx={{ fontWeight: 600 }}>Kaynak Servis</TableCell>
                   <TableCell sx={{ fontWeight: 600 }}>Atanan</TableCell>
                 </TableRow>
               </TableHead>
@@ -598,18 +697,24 @@ function WorkItemsSection({ productId, pmType, workItemIds, collapsed, onToggle 
                   const type = wi.fields['System.WorkItemType'];
                   const state = wi.fields['System.State'];
                   const wiUrl = wi.url?.replace('_apis/wit/workItems', '_workitems/edit').split('?')[0];
+                  const sourceRepo = wiToRepo.get(wi.id);
                   return (
                     <TableRow key={wi.id} hover>
                       <TableCell>
                         <Link href={wiUrl ?? '#'} target="_blank" rel="noopener" variant="body2">#{wi.id}</Link>
                       </TableCell>
                       <TableCell>
-                        <Typography variant="body2" sx={{ maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <Typography variant="body2" sx={{ maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {wi.fields['System.Title'] ?? '—'}
                         </Typography>
                       </TableCell>
                       <TableCell><Chip label={type ?? '—'} size="small" color={wiTypeColor(type)} /></TableCell>
                       <TableCell><Chip label={state ?? '—'} size="small" color={wiStateColor(state)} /></TableCell>
+                      <TableCell>
+                        {sourceRepo
+                          ? <Chip label={sourceRepo} size="small" variant="outlined" sx={{ maxWidth: 160, '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' } }} />
+                          : <Typography variant="caption" color="text.disabled">—</Typography>}
+                      </TableCell>
                       <TableCell>
                         <Typography variant="caption" color="text.secondary">
                           {assignedName(wi.fields['System.AssignedTo'])}
@@ -715,6 +820,7 @@ function ReleaseNotesSection({ versionId, productId, workItemIds, collapsed, onT
         <Table size="small">
           <TableHead>
             <TableRow sx={{ bgcolor: 'grey.50' }}>
+              <TableCell sx={{ fontWeight: 600 }}>WI ID</TableCell>
               <TableCell sx={{ fontWeight: 600 }}>Kategori</TableCell>
               <TableCell sx={{ fontWeight: 600 }}>Başlık</TableCell>
               <TableCell sx={{ fontWeight: 600 }}>Durum</TableCell>
@@ -729,6 +835,11 @@ function ReleaseNotesSection({ versionId, productId, workItemIds, collapsed, onT
                 <TableRow key={note.id} hover
                   onClick={() => hasContent && setExpandedId(isExp ? null : note.id)}
                   sx={{ cursor: hasContent ? 'pointer' : 'default' }}>
+                  <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                    {note.workitemId
+                      ? <Chip label={`#${note.workitemId}`} size="small" variant="outlined" />
+                      : <Typography variant="caption" color="text.disabled">—</Typography>}
+                  </TableCell>
                   <TableCell><Chip label={note.category} size="small" color={note.isBreaking ? 'error' : 'default'} /></TableCell>
                   <TableCell><Typography variant="body2">{note.title}</Typography></TableCell>
                   <TableCell>
@@ -746,7 +857,7 @@ function ReleaseNotesSection({ versionId, productId, workItemIds, collapsed, onT
               if (isExp && hasContent) {
                 rows.push(
                   <TableRow key={`${note.id}-exp`}>
-                    <TableCell colSpan={4} sx={{ bgcolor: 'grey.50', pb: 2 }}>
+                    <TableCell colSpan={5} sx={{ bgcolor: 'grey.50', pb: 2 }}>
                       <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{note.description}</Typography>
                     </TableCell>
                   </TableRow>
@@ -864,34 +975,13 @@ const TIMING_LABELS: Record<string, string> = {
 function TodosSection({ versionId, collapsed, onToggle, onStatsChange }: {
   versionId: string; collapsed: boolean; onToggle: () => void; onStatsChange: (n: number) => void;
 }) {
-  const qc = useQueryClient();
-
   const { data: todos = [], isLoading, isError, refetch } = useQuery<ReleaseTodo[]>({
     queryKey: ['todos-v3', versionId],
     queryFn: () => apiClient.get(`/release-todos?versionId=${versionId}`).then(r => r.data.data),
     enabled: !!versionId, staleTime: 0,
   });
 
-  type TodoToggleVars = { id: string; isCompleted: boolean };
-  type TodoToggleCtx = { prev?: ReleaseTodo[] };
-
-  const toggleMutation = useMutation<unknown, unknown, TodoToggleVars, TodoToggleCtx>({
-    mutationFn: ({ id, isCompleted }: TodoToggleVars) =>
-      apiClient.patch(`/release-todos/${id}`, { isCompleted }),
-    onMutate: async ({ id, isCompleted }: TodoToggleVars) => {
-      await qc.cancelQueries({ queryKey: ['todos-v3', versionId] });
-      const prev = qc.getQueryData<ReleaseTodo[]>(['todos-v3', versionId]);
-      qc.setQueryData<ReleaseTodo[]>(['todos-v3', versionId],
-        old => old?.map(t => t.id === id ? { ...t, isCompleted } : t) ?? []);
-      return { prev };
-    },
-    onError: (_e: unknown, _v: TodoToggleVars, ctx: TodoToggleCtx | undefined) => {
-      if (ctx?.prev) qc.setQueryData(['todos-v3', versionId], ctx.prev);
-    },
-  });
-
   const incompleteP0 = useMemo(() => todos.filter(t => t.priority === 'P0' && !t.isCompleted), [todos]);
-  const completedCount = todos.filter(t => t.isCompleted).length;
 
   useEffect(() => { onStatsChange(incompleteP0.length); }, [incompleteP0.length, onStatsChange]);
 
@@ -901,7 +991,7 @@ function TodosSection({ versionId, collapsed, onToggle, onStatsChange }: {
 
   return (
     <SectionShell icon="☑" title="Release Todos" status={sectionStatus}
-      statusNote={todos.length > 0 ? `Tamamlanan: ${completedCount}/${todos.length}  P0 Eksik: ${incompleteP0.length}` : ''}
+      statusNote={todos.length > 0 ? `Toplam: ${todos.length}  P0 Eksik: ${incompleteP0.length}` : ''}
       collapsed={collapsed} onToggle={onToggle}>
       {isLoading && <Skeleton variant="rectangular" height={100} />}
       {isError && !isLoading && (
@@ -928,18 +1018,11 @@ function TodosSection({ versionId, collapsed, onToggle, onStatsChange }: {
                 {group.map(todo => (
                   <Box key={todo.id} sx={{
                     display: 'flex', alignItems: 'center', gap: 1.5, py: 0.75, px: 1, borderRadius: 1, mb: 0.5,
-                    bgcolor: todo.priority === 'P0' && !todo.isCompleted ? 'error.50' : 'transparent',
-                    '&:hover': { bgcolor: todo.priority === 'P0' && !todo.isCompleted ? 'error.100' : 'grey.50' },
+                    bgcolor: todo.priority === 'P0' ? 'error.50' : 'transparent',
+                    '&:hover': { bgcolor: todo.priority === 'P0' ? 'error.100' : 'grey.50' },
                   }}>
-                    <Checkbox size="small" checked={todo.isCompleted}
-                      onChange={e => toggleMutation.mutate({ id: todo.id, isCompleted: e.target.checked })}
-                      disabled={toggleMutation.isPending} />
                     <Chip label={todo.priority} size="small" color={priorityColor(todo.priority)} />
-                    <Typography variant="body2" sx={{
-                      flex: 1,
-                      textDecoration: todo.isCompleted ? 'line-through' : 'none',
-                      color: todo.isCompleted ? 'text.disabled' : 'text.primary',
-                    }}>
+                    <Typography variant="body2" sx={{ flex: 1 }}>
                       {todo.title}
                     </Typography>
                     {todo.category && (
@@ -950,61 +1033,153 @@ function TodosSection({ versionId, collapsed, onToggle, onStatsChange }: {
               </Box>
             );
           })}
-          {todos.every(t => t.isCompleted) && (
-            <Alert severity="success">🎉 Tüm todo'lar tamamlandı!</Alert>
-          )}
+
         </>
       )}
     </SectionShell>
   );
 }
 
-// ─── Approve Dialog ───────────────────────────────────────────────────────────
+// ─── Approve Dialog (2-step: Health Summary → Package Options) ────────────────
+
+const PACKAGE_TYPE_LABELS: Record<string, string> = {
+  HELM_CHART: 'HelmChart (.tgz)',
+  DOCKER_IMAGE: 'Docker Image',
+  BINARY: 'Binary / DLL Paketi (.zip)',
+  GIT_ARCHIVE: 'Git Archive',
+};
 
 function ApproveDialog({ open, onClose, versionLabel, healthScore, openPRCount, p0TodoCount, breakingCount, serviceCount, onConfirm, isPending, error }: {
   open: boolean; onClose: () => void; versionLabel: string; healthScore: number;
   openPRCount: number; p0TodoCount: number; breakingCount: number; serviceCount: number;
-  onConfirm: () => void; isPending: boolean; error?: string | null;
+  onConfirm: (packageOptions?: { createPackage: boolean; packageType?: string; packageName?: string }) => void;
+  isPending: boolean; error?: string | null;
 }) {
+  const [step, setStep] = useState<1 | 2>(1);
+  const [createPackage, setCreatePackage] = useState(false);
+  const [packageType, setPackageType] = useState('HELM_CHART');
+  const [packageName, setPackageName] = useState('');
+
+  // Reset on open
+  useEffect(() => {
+    if (open) { setStep(1); setCreatePackage(false); setPackageType('HELM_CHART'); setPackageName(''); }
+  }, [open]);
+
   const rows = [
     { icon: openPRCount === 0 ? '✅' : '⚠️', label: "PR'lar", value: openPRCount === 0 ? 'Tümü merged' : `${openPRCount} açık PR var` },
     { icon: p0TodoCount === 0 ? '✅' : '❌', label: "P0 Todo'lar", value: p0TodoCount === 0 ? 'Tümü tamamlandı' : `${p0TodoCount} eksik` },
     { icon: breakingCount === 0 ? '✅' : '⚠️', label: 'Breaking Change', value: breakingCount === 0 ? 'Yok' : `${breakingCount} adet` },
     { icon: healthScore >= 80 ? '✅' : '⚠️', label: 'Sağlık Skoru', value: `${healthScore} / 100` },
   ];
+
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
-      <DialogTitle>🚀 Release Onayla — {versionLabel}</DialogTitle>
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>
+        {step === 1 ? `🚀 Release Onayla — ${versionLabel}` : `📦 Paket Oluştur — ${versionLabel}`}
+      </DialogTitle>
       <DialogContent>
-        <Typography variant="body2" color="text.secondary" gutterBottom>Son durum özeti:</Typography>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, my: 1.5 }}>
-          {rows.map(row => (
-            <Box key={row.label} sx={{ display: 'flex', gap: 1 }}>
-              <Typography>{row.icon}</Typography>
-              <Typography variant="body2" fontWeight={600} sx={{ minWidth: 120 }}>{row.label}</Typography>
-              <Typography variant="body2" color="text.secondary">{row.value}</Typography>
+        {step === 1 ? (
+          <>
+            <Typography variant="body2" color="text.secondary" gutterBottom>Son durum özeti:</Typography>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, my: 1.5 }}>
+              {rows.map(row => (
+                <Box key={row.label} sx={{ display: 'flex', gap: 1 }}>
+                  <Typography>{row.icon}</Typography>
+                  <Typography variant="body2" fontWeight={600} sx={{ minWidth: 120 }}>{row.label}</Typography>
+                  <Typography variant="body2" color="text.secondary">{row.value}</Typography>
+                </Box>
+              ))}
             </Box>
-          ))}
-        </Box>
-        <Divider sx={{ my: 1.5 }} />
-        <Box sx={{ bgcolor: 'primary.50', borderRadius: 1, p: 1.5, mb: 1.5 }}>
-          <Typography variant="body2" fontWeight={600} gutterBottom>📸 Servis Release Snapshot</Typography>
-          <Typography variant="caption" color="text.secondary">
-            Bu işlem aynı zamanda {serviceCount > 0 ? `${serviceCount} servisin` : 'ürünün tüm servislerinin'} mevcut
-            PR listesini kaydeder. Bir sonraki versiyonda PR delta bu noktadan hesaplanacak.
-          </Typography>
-        </Box>
-        <Typography variant="caption" color="text.secondary">
-          Bu işlem versiyonun fazını PROD'a taşır ve releaseDate'i bugünün tarihi olarak kaydeder.{' '}
-          <strong>Geri alınamaz.</strong>
-        </Typography>
+            <Divider sx={{ my: 1.5 }} />
+            <Box sx={{ bgcolor: 'primary.50', borderRadius: 1, p: 1.5, mb: 1.5 }}>
+              <Typography variant="body2" fontWeight={600} gutterBottom>📸 Servis Release Snapshot</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Bu işlem aynı zamanda {serviceCount > 0 ? `${serviceCount} servisin` : 'ürünün tüm servislerinin'} mevcut
+                PR listesini kaydeder. Bir sonraki versiyonda PR delta bu noktadan hesaplanacak.
+              </Typography>
+            </Box>
+            {healthScore < 100 && (
+              <Alert severity="warning" sx={{ mb: 1.5 }}>
+                ⚠️ Sağlık skoru <strong>{healthScore}/100</strong> — ideal koşullar sağlanmamış. Yine de devam etmek sizin sorumluluğunuzdadır.
+              </Alert>
+            )}
+            <Typography variant="caption" color="text.secondary">
+              Bu işlem versiyonun fazını PROD'a taşır ve releaseDate'i bugünün tarihi olarak kaydeder.{' '}
+              <strong>Geri alınamaz.</strong>
+            </Typography>
+          </>
+        ) : (
+          <>
+            <Typography variant="body2" color="text.secondary" gutterBottom>
+              Müşterilere dağıtılacak bir paket oluşturmak ister misiniz?
+            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, my: 2 }}>
+              <Button
+                variant={createPackage ? 'contained' : 'outlined'}
+                size="small"
+                onClick={() => setCreatePackage(true)}
+              >
+                Evet, Paket Oluştur
+              </Button>
+              <Button
+                variant={!createPackage ? 'contained' : 'outlined'}
+                size="small"
+                color="inherit"
+                onClick={() => setCreatePackage(false)}
+              >
+                Hayır, Sadece Yayınla
+              </Button>
+            </Box>
+            {createPackage && (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
+                <FormControl size="small" fullWidth>
+                  <InputLabel>Paket Tipi</InputLabel>
+                  <Select value={packageType} label="Paket Tipi" onChange={e => setPackageType(e.target.value)}>
+                    {Object.entries(PACKAGE_TYPE_LABELS).map(([key, label]) => (
+                      <MenuItem key={key} value={key}>{label}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    Paket adı boş bırakılırsa versiyon adından otomatik oluşturulur.
+                  </Typography>
+                  <input
+                    type="text"
+                    placeholder={`örn: ${versionLabel.replace(/\s/g, '-').toLowerCase()}`}
+                    value={packageName}
+                    onChange={e => setPackageName(e.target.value)}
+                    style={{
+                      width: '100%', padding: '8px 12px', marginTop: 4,
+                      border: '1px solid #ccc', borderRadius: 4, fontSize: 14,
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+          </>
+        )}
         {error && <Alert severity="error" sx={{ mt: 1.5 }}>{error}</Alert>}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose} disabled={isPending}>İptal</Button>
-        <Button variant="contained" color="success" onClick={onConfirm} disabled={isPending}>
-          {isPending ? 'Onaylanıyor...' : 'Evet, Yayınla →'}
-        </Button>
+        {step === 1 ? (
+          <>
+            <Button onClick={onClose} disabled={isPending}>İptal</Button>
+            <Button variant="contained" color="success" onClick={() => setStep(2)}>
+              Devam →
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button onClick={() => setStep(1)} disabled={isPending}>← Geri</Button>
+            <Button onClick={onClose} disabled={isPending}>İptal</Button>
+            <Button variant="contained" color="success" disabled={isPending}
+              onClick={() => onConfirm(createPackage ? { createPackage: true, packageType, packageName: packageName || undefined } : undefined)}
+            >
+              {isPending ? 'Onaylanıyor...' : 'Evet, Yayınla →'}
+            </Button>
+          </>
+        )}
       </DialogActions>
     </Dialog>
   );
@@ -1024,6 +1199,8 @@ export default function ReleaseHealthCheckPage() {
   });
   const [bomWorkItemIds, setBomWorkItemIds] = useState<number[]>([]);
   const [prWorkItemIds, setPrWorkItemIds] = useState<number[]>([]);
+  const [deltaPRs, setDeltaPRs] = useState<PR[]>([]);
+  const [wiToRepo, setWiToRepo] = useState<Map<number, string>>(new Map());
   const collectedWorkItemIds = useMemo(
     () => [...new Set([...bomWorkItemIds, ...prWorkItemIds])],
     [bomWorkItemIds, prWorkItemIds],
@@ -1045,14 +1222,14 @@ export default function ReleaseHealthCheckPage() {
   });
 
   const selectableVersions = useMemo(() =>
-    versions.filter(v => { const ph = computePhase(v); return ph === 'PREP' || ph === 'WAITING'; }),
+    versions.filter(v => v.phase !== 'PRODUCTION' && v.phase !== 'ARCHIVED'),
     [versions]
   );
 
   const selectedVerObj = versions.find(v => v.id === selectedVersion);
   const enabled = !!selectedVersion;
 
-  const { data: prsForScore = [] } = useQuery<PR[]>({
+  const { data: prsForScore = [], isLoading: isPrsLoading } = useQuery<PR[]>({
     queryKey: ['prs-v3', selectedProduct],
     queryFn: () => apiClient.get(`/tfs/pull-requests?productId=${selectedProduct}`)
       .then(r => { const d = r.data.data ?? r.data; return d.value ?? (Array.isArray(d) ? d : []); }),
@@ -1060,7 +1237,7 @@ export default function ReleaseHealthCheckPage() {
     staleTime: 0, retry: 1,
   });
 
-  const { data: changesForScore = [] } = useQuery<SystemChange[]>({
+  const { data: changesForScore = [], isLoading: isChangesLoading } = useQuery<SystemChange[]>({
     queryKey: ['system-changes-v3', selectedVersion],
     queryFn: () => apiClient.get(`/system-changes?versionId=${selectedVersion}`).then(r => r.data.data),
     enabled, staleTime: 60_000,
@@ -1075,9 +1252,9 @@ export default function ReleaseHealthCheckPage() {
 
   const serviceCount = useMemo(() => {
     if (!productDetail) return 0;
-    const fromMods = productDetail.moduleGroups.flatMap(g => g.modules.flatMap(m => m.services));
+    const fromMods = (productDetail.moduleGroups ?? []).flatMap(g => g.modules.flatMap(m => m.services));
     const modSvcIds = new Set(fromMods.map(s => s.id));
-    return fromMods.length + productDetail.services.filter(s => !modSvcIds.has(s.id)).length;
+    return fromMods.length + (productDetail.services ?? []).filter(s => !modSvcIds.has(s.id)).length;
   }, [productDetail]);
 
   const openPRs = useMemo(() => {
@@ -1102,26 +1279,45 @@ export default function ReleaseHealthCheckPage() {
   const canRelease = healthScore >= 80 && openPRs.length === 0 && incompleteP0Count === 0;
 
   const approveMutation = useMutation({
-    mutationFn: () => apiClient.patch(`/product-versions/${selectedVersion}/release`),
+    mutationFn: (opts?: { createPackage: boolean; packageType?: string; packageName?: string }) =>
+      apiClient.patch(`/product-versions/${selectedVersion}/release`).then(async (releaseRes) => {
+        // Background: snapshot
+        const capturedProductId = selectedProduct;
+        const capturedVersionId = selectedVersion;
+        apiClient
+          .post('/service-release-snapshots', { productId: capturedProductId, productVersionId: capturedVersionId })
+          .then(r => {
+            const snap = r.data.data as { succeeded: string[]; failed: { serviceId: string }[] };
+            queryClient.invalidateQueries({ queryKey: ['service-snapshots', capturedProductId] });
+            if (snap.failed?.length > 0) {
+              console.warn('[Snapshot] Kısmi hata:', snap.failed);
+            }
+          })
+          .catch(err => console.warn('[Snapshot] Snapshot çağrısı başarısız:', err));
+
+        // VersionPackage creation (if requested)
+        if (opts?.createPackage && opts.packageType) {
+          const verObj = versions.find(v => v.id === capturedVersionId);
+          const prodObj = products.find(p => p.id === capturedProductId);
+          const pkgName = opts.packageName || `${prodObj?.name ?? 'pkg'}-v${verObj?.version ?? '0'}`;
+          await apiClient.post('/version-packages', {
+            productVersionId: capturedVersionId,
+            packageType: opts.packageType,
+            name: pkgName,
+            version: verObj?.version ?? '1.0.0',
+            description: `Release package for ${prodObj?.name ?? ''} v${verObj?.version ?? ''}`,
+            publishedBy: 'system',
+          });
+        }
+
+        return releaseRes;
+      }),
     onSuccess: () => {
       setApproveOpen(false);
       setApproveError(null);
       setToast('🎉 Versiyon başarıyla yayınlandı!');
       queryClient.invalidateQueries({ queryKey: ['product-versions', selectedProduct] });
-      // Background: tüm servislerin release snapshot'ını kaydet (başarısız olsa bile versiyon yayınlanmış sayılır)
-      const capturedProductId = selectedProduct;
-      const capturedVersionId = selectedVersion;
       setSelectedVersion('');
-      apiClient
-        .post('/service-release-snapshots', { productId: capturedProductId, productVersionId: capturedVersionId })
-        .then(r => {
-          const snap = r.data.data as { succeeded: string[]; failed: { serviceId: string }[] };
-          queryClient.invalidateQueries({ queryKey: ['service-snapshots', capturedProductId] });
-          if (snap.failed?.length > 0) {
-            console.warn('[Snapshot] Kısmi hata — bazı servisler snapshot alınamadı:', snap.failed);
-          }
-        })
-        .catch(err => console.warn('[Snapshot] Snapshot çağrısı başarısız:', err));
     },
     onError: (err: unknown) => {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Bir hata oluştu.';
@@ -1145,6 +1341,8 @@ export default function ReleaseHealthCheckPage() {
     setSelectedVersion('');
     setBomWorkItemIds([]);
     setPrWorkItemIds([]);
+    setDeltaPRs([]);
+    setWiToRepo(new Map());
   };
 
   const toggleSection = (key: string) => setCollapsed(prev => ({ ...prev, [key]: !prev[key] }));
@@ -1178,14 +1376,21 @@ export default function ReleaseHealthCheckPage() {
             </Select>
           </FormControl>
           <FormControl size="small" sx={{ minWidth: 230 }} disabled={!selectedProduct}>
-            <InputLabel>Versiyon (PREP / WAITING)</InputLabel>
-            <Select value={selectedVersion} label="Versiyon (PREP / WAITING)"
+            <InputLabel>Versiyon</InputLabel>
+            <Select value={selectedVersion} label="Versiyon"
               onChange={e => setSelectedVersion(e.target.value)}>
               {selectableVersions.length === 0 && (
-                <MenuItem value="" disabled>PREP/WAITING fazında versiyon yok</MenuItem>
+                <MenuItem value="" disabled>Aktif versiyon yok (tümü PROD veya arşivde)</MenuItem>
               )}
               {selectableVersions.map(v => (
-                <MenuItem key={v.id} value={v.id}>v{v.version} — {phaseLabel(v)}</MenuItem>
+                <MenuItem key={v.id} value={v.id}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Chip label={PHASE_META[v.phase]?.label ?? v.phase} size="small"
+                      color={PHASE_META[v.phase]?.color ?? 'default'}
+                      sx={{ height: 18, fontSize: 10 }} />
+                    v{v.version}
+                  </Box>
+                </MenuItem>
               ))}
             </Select>
           </FormControl>
@@ -1193,7 +1398,7 @@ export default function ReleaseHealthCheckPage() {
 
         {selectedVersion && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', mt: 1 }}>
-            <ScoreGauge score={healthScore} loading={false} />
+            <ScoreGauge score={healthScore} loading={enabled && (isPrsLoading || isChangesLoading)} />
             <Box sx={{ flexGrow: 1 }}>
               <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 1 }}>
                 {openPRs.length > 0 && (
@@ -1212,7 +1417,7 @@ export default function ReleaseHealthCheckPage() {
                 = <strong>{healthScore}</strong>
               </Typography>
             </Box>
-            <Button variant="contained" color="success" size="large" disabled={!canRelease}
+            <Button variant="contained" color="success" size="large"
               onClick={() => { setApproveError(null); setApproveOpen(true); }}>
               Release Onayla ✅
             </Button>
@@ -1243,19 +1448,22 @@ export default function ReleaseHealthCheckPage() {
             collapsed={collapsed.bom}
             onToggle={() => toggleSection('bom')}
             onWorkItemsCollected={setBomWorkItemIds}
+            onDeltaPrsCollected={setDeltaPRs}
           />
           <PrSection
             productId={selectedProduct}
             pmType={selectedProductObj?.pmType}
-            preProdDate={selectedVerObj?.preProdDate}
+            deltaPRs={deltaPRs.length > 0 ? deltaPRs : undefined}
             collapsed={collapsed.prs}
             onToggle={() => toggleSection('prs')}
             onWorkItemsCollected={setPrWorkItemIds}
+            onWiToRepoCollected={setWiToRepo}
           />
           <WorkItemsSection
             productId={selectedProduct}
             pmType={selectedProductObj?.pmType}
             workItemIds={collectedWorkItemIds}
+            wiToRepo={wiToRepo}
             collapsed={collapsed.workItems}
             onToggle={() => toggleSection('workItems')}
           />
@@ -1290,7 +1498,7 @@ export default function ReleaseHealthCheckPage() {
         p0TodoCount={incompleteP0Count}
         breakingCount={breakingChanges.length}
         serviceCount={serviceCount}
-        onConfirm={() => approveMutation.mutate()}
+        onConfirm={(packageOptions) => approveMutation.mutate(packageOptions)}
         isPending={approveMutation.isPending}
         error={approveError}
       />

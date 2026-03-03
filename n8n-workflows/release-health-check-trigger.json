@@ -1,0 +1,290 @@
+{
+  "name": "Release Health Check — Otomatik Tetikleyici",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "b2c3d4e5-0002-4002-8002-000000000001",
+      "name": "Saatlik Tetikleyici",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.BACKEND_URL }}/api/releases?phase=UAT,STAGING,PRODUCTION&limit=100",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.BACKEND_TOKEN }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "b2c3d4e5-0002-4002-8002-000000000002",
+      "name": "Aktif Release'leri Getir",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data",
+        "options": {}
+      },
+      "id": "b2c3d4e5-0002-4002-8002-000000000003",
+      "name": "Release Listesini Böl",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Determine if health check is needed based on last check time\nconst release = $json;\nconst lastCheck = release.healthChecks?.[0]?.createdAt;\n\nif (!lastCheck) {\n  // Never checked — should run\n  return [{ json: { ...release, _shouldCheck: true, _reason: 'never_checked' } }];\n}\n\nconst lastCheckDate = new Date(lastCheck);\nconst hoursSinceCheck = (Date.now() - lastCheckDate.getTime()) / (1000 * 60 * 60);\n\n// Check every 4 hours for UAT/STAGING, every hour for PRODUCTION\nconst threshold = release.phase === 'PRODUCTION' ? 1 : 4;\n\nreturn [{\n  json: {\n    ...release,\n    _shouldCheck: hoursSinceCheck >= threshold,\n    _lastCheck: lastCheck,\n    _hoursSinceCheck: Math.round(hoursSinceCheck * 10) / 10,\n    _reason: hoursSinceCheck >= threshold ? 'interval_reached' : 'too_recent',\n  }\n}];\n"
+      },
+      "id": "b2c3d4e5-0002-4002-8002-000000000004",
+      "name": "Health Check Zamanı Kontrol Et",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-should-check",
+              "leftValue": "={{ $json._shouldCheck }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b2c3d4e5-0002-4002-8002-000000000005",
+      "name": "Check Gerekli mi?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $vars.BACKEND_URL }}/api/releases/{{ $json.id }}/commits",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.BACKEND_TOKEN }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "b2c3d4e5-0002-4002-8002-000000000006",
+      "name": "Commit Analizi Getir",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, -80]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Calculate health score from commit analysis and other signals\nconst release = $('Release Listesini Böl').first().json;\nconst commitData = $json;\n\nconst commits = commitData.commits ?? [];\nconst totalCommits = commits.length;\n\n// Heuristics for health score\nlet score = 100;\n\n// More commits = more risk\nif (totalCommits > 100) score -= 20;\nelse if (totalCommits > 50) score -= 10;\nelse if (totalCommits > 20) score -= 5;\n\n// Check for risky commit patterns (WIP, fix, hotfix keywords)\nconst riskyCommits = commits.filter((c) => {\n  const msg = (c.message || '').toLowerCase();\n  return msg.includes('wip') || msg.includes('hotfix') || msg.includes('revert');\n});\n\nscore -= Math.min(riskyCommits.length * 5, 30);\n\n// Phase bonus\nif (release.phase === 'PRODUCTION') score = Math.max(score, 60);\n\nconst finalScore = Math.max(0, Math.min(100, score));\nconst riskLevel = finalScore >= 80 ? 'LOW' : finalScore >= 60 ? 'MEDIUM' : 'HIGH';\n\nreturn [{\n  json: {\n    productVersionId: release.id,\n    healthScore: finalScore,\n    riskLevel,\n    commitCount: totalCommits,\n    commitAnalysis: {\n      total: totalCommits,\n      risky: riskyCommits.length,\n      riskKeywords: [...new Set(riskyCommits.map((c) => {\n        const msg = (c.message || '').toLowerCase();\n        if (msg.includes('wip')) return 'WIP';\n        if (msg.includes('hotfix')) return 'HOTFIX';\n        if (msg.includes('revert')) return 'REVERT';\n        return 'OTHER';\n      }))],\n    },\n    checkedAt: new Date().toISOString(),\n  }\n}];\n"
+      },
+      "id": "b2c3d4e5-0002-4002-8002-000000000007",
+      "name": "Health Score Hesapla",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, -80]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.BACKEND_URL }}/api/health-checks",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.BACKEND_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "b2c3d4e5-0002-4002-8002-000000000008",
+      "name": "Health Check Kaydet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1540, -80]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-critical",
+              "leftValue": "={{ $json.healthScore }}",
+              "rightValue": 50,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b2c3d4e5-0002-4002-8002-000000000009",
+      "name": "Kritik Sağlık Skoru?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1760, -80]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.BACKEND_URL }}/api/notifications",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.BACKEND_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"title\": \"⚠️ Kritik Health Check\", \"message\": \"Release {{ $('Release Listesini Böl').first().json.product.name }} v{{ $('Release Listesini Böl').first().json.version }} için health score düştü: % {{ $('Health Score Hesapla').first().json.healthScore }}\", \"type\": \"HEALTH_ALERT\", \"productVersionId\": \"{{ $('Release Listesini Böl').first().json.id }}\"}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "b2c3d4e5-0002-4002-8002-000000000010",
+      "name": "Kritik Uyarı Gönder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1980, -160]
+    },
+    {
+      "parameters": {
+        "jsCode": "const all = $input.all();\nconsole.log(`Health check tamamlandı: ${all.length} release işlendi.`);\nreturn [{ json: { processed: all.length, timestamp: new Date().toISOString() } }];"
+      },
+      "id": "b2c3d4e5-0002-4002-8002-000000000011",
+      "name": "Özet",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2200, -80]
+    }
+  ],
+  "connections": {
+    "Saatlik Tetikleyici": {
+      "main": [
+        [{ "node": "Aktif Release'leri Getir", "type": "main", "index": 0 }]
+      ]
+    },
+    "Aktif Release'leri Getir": {
+      "main": [
+        [{ "node": "Release Listesini Böl", "type": "main", "index": 0 }]
+      ]
+    },
+    "Release Listesini Böl": {
+      "main": [
+        [{ "node": "Health Check Zamanı Kontrol Et", "type": "main", "index": 0 }]
+      ]
+    },
+    "Health Check Zamanı Kontrol Et": {
+      "main": [
+        [{ "node": "Check Gerekli mi?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Check Gerekli mi?": {
+      "main": [
+        [{ "node": "Commit Analizi Getir", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Commit Analizi Getir": {
+      "main": [
+        [{ "node": "Health Score Hesapla", "type": "main", "index": 0 }]
+      ]
+    },
+    "Health Score Hesapla": {
+      "main": [
+        [{ "node": "Health Check Kaydet", "type": "main", "index": 0 }]
+      ]
+    },
+    "Health Check Kaydet": {
+      "main": [
+        [{ "node": "Kritik Sağlık Skoru?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Kritik Sağlık Skoru?": {
+      "main": [
+        [{ "node": "Kritik Uyarı Gönder", "type": "main", "index": 0 }],
+        [{ "node": "Özet", "type": "main", "index": 0 }]
+      ]
+    },
+    "Kritik Uyarı Gönder": {
+      "main": [
+        [{ "node": "Özet", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "1.0.0",
+  "tags": ["health-check", "release", "monitoring", "automation"]
+}

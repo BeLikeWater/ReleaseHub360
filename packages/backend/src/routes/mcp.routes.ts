@@ -10,6 +10,7 @@
 import { Router } from 'express';
 import { authenticateJWT } from '../middleware/auth.middleware';
 import prisma from '../lib/prisma';
+import { decrypt } from '../lib/encryption';
 
 const router = Router();
 router.use(authenticateJWT);
@@ -22,11 +23,12 @@ const ANALYZE_TIMEOUT_MS = 90_000; // AI analiz çağrıları daha uzun sürebil
 async function resolveAzureCreds(productId?: string) {
   if (!productId) return undefined;
   const product = await prisma.product.findUnique({ where: { id: productId } });
-  if (product?.pmType === 'AZURE' && product.azureOrg && product.azureProject && product.azurePat) {
+  const isAzure = product?.pmType === 'AZURE' || product?.sourceControlType === 'AZURE';
+  if (product && isAzure && product.azureOrg && product.azureProject && product.azurePat) {
     return {
       azure_org: product.azureOrg,
       azure_project: product.azureProject,
-      azure_pat: product.azurePat,
+      azure_pat: decrypt(product.azurePat),
     };
   }
   return undefined;

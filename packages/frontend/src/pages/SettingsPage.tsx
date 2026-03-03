@@ -133,6 +133,7 @@ export default function SettingsPage() {
         <Tab label="Entegrasyonlar" />
         <Tab label="Bildirimler" />
         <Tab label="Genel" />
+        <Tab label="Güvenlik" />
       </Tabs>
 
       {/* Integrations Tab */}
@@ -286,6 +287,122 @@ export default function SettingsPage() {
             </TextField>
           </Stack>
         </Paper>
+      )}
+
+      {/* Security Tab */}
+      {tab === 3 && (
+        <Stack spacing={3}>
+          {/* Password Policy */}
+          <Paper variant="outlined" sx={{ p: 2.5 }}>
+            <Typography variant="subtitle1" fontWeight={700} mb={2}>Parola Politikası</Typography>
+            <Stack spacing={2}>
+              <TextField
+                select fullWidth label="Minimum Parola Uzunluğu" size="small"
+                value={localSettings['security.minPasswordLength'] ?? '8'}
+                onChange={(e) => handleChange('security.minPasswordLength', e.target.value)}
+                SelectProps={{ native: true }}
+              >
+                {['6', '8', '10', '12', '16'].map((v) => (
+                  <option key={v} value={v}>{v} karakter</option>
+                ))}
+              </TextField>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={localSettings['security.requireSpecialChar'] === 'true'}
+                    onChange={(e) => handleChange('security.requireSpecialChar', e.target.checked ? 'true' : 'false')}
+                    size="small"
+                  />
+                }
+                label="Özel karakter zorunlu (!@#$%^&*)"
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={localSettings['security.requireUppercase'] === 'true'}
+                    onChange={(e) => handleChange('security.requireUppercase', e.target.checked ? 'true' : 'false')}
+                    size="small"
+                  />
+                }
+                label="Büyük harf zorunlu"
+              />
+              <TextField
+                select fullWidth label="Parola Geçerlilik Süresi" size="small"
+                value={localSettings['security.passwordExpiry'] ?? '90'}
+                onChange={(e) => handleChange('security.passwordExpiry', e.target.value)}
+                SelectProps={{ native: true }}
+              >
+                {['30', '60', '90', '180', '365'].map((v) => (
+                  <option key={v} value={v}>{v} gün</option>
+                ))}
+              </TextField>
+            </Stack>
+          </Paper>
+
+          {/* Session Management */}
+          <Paper variant="outlined" sx={{ p: 2.5 }}>
+            <Typography variant="subtitle1" fontWeight={700} mb={2}>Oturum Yönetimi</Typography>
+            <Stack spacing={2}>
+              <TextField
+                select fullWidth label="Maksimum Eşzamanlı Oturum" size="small"
+                value={localSettings['security.maxSessions'] ?? '3'}
+                onChange={(e) => handleChange('security.maxSessions', e.target.value)}
+                SelectProps={{ native: true }}
+              >
+                {['1', '2', '3', '5', '10'].map((v) => (
+                  <option key={v} value={v}>{v} oturum</option>
+                ))}
+              </TextField>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={localSettings['security.forceLogoutOnPasswordChange'] === 'true'}
+                    onChange={(e) => handleChange('security.forceLogoutOnPasswordChange', e.target.checked ? 'true' : 'false')}
+                    size="small"
+                  />
+                }
+                label="Parola değişiminde tüm oturumları kapat"
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={localSettings['security.ipWhitelist'] === 'true'}
+                    onChange={(e) => handleChange('security.ipWhitelist', e.target.checked ? 'true' : 'false')}
+                    size="small"
+                  />
+                }
+                label="IP whitelist etkin (Genel ay.’dan yapılandırın)"
+              />
+            </Stack>
+          </Paper>
+
+          {/* Audit Log */}
+          <Paper variant="outlined" sx={{ p: 2.5 }}>
+            <Typography variant="subtitle1" fontWeight={700} mb={2}>Denetim Günlüğü</Typography>
+            <Stack spacing={2}>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={localSettings['security.auditLog'] !== 'false'}
+                    onChange={(e) => handleChange('security.auditLog', e.target.checked ? 'true' : 'false')}
+                    size="small"
+                  />
+                }
+                label="Denetim günlüğü etkin"
+              />
+              <TextField
+                select fullWidth label="Denetim Kaydı Saklama Süresi" size="small"
+                value={localSettings['security.auditRetentionDays'] ?? '90'}
+                onChange={(e) => handleChange('security.auditRetentionDays', e.target.value)}
+                SelectProps={{ native: true }}
+              >
+                {['30', '60', '90', '180', '365'].map((v) => (
+                  <option key={v} value={v}>{v} gün</option>
+                ))}
+              </TextField>
+            </Stack>
+          </Paper>
+        </Stack>
       )}
 
       {/* Sticky Save */}

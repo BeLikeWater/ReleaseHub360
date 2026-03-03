@@ -109,13 +109,33 @@ function NewVersionDialog({ open, onClose, products }: { open: boolean; onClose:
   const [targetDate, setTargetDate] = useState('');
   const [description, setDescription] = useState('');
   const save = useMutation({
-    mutationFn: () => apiClient.post('/product-versions', { productId, version, targetDate: targetDate || undefined, description }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['versions'] }); onClose(); },
+    mutationFn: () => apiClient.post('/product-versions', {
+      productId,
+      version,
+      // Convert date-only string to full ISO datetime for Zod validation
+      targetDate: targetDate ? new Date(targetDate).toISOString() : undefined,
+      description,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['versions'] });
+      setProductId(''); setVersion(''); setTargetDate(''); setDescription('');
+      onClose();
+    },
   });
+  const handleClose = () => {
+    setProductId(''); setVersion(''); setTargetDate(''); setDescription('');
+    save.reset();
+    onClose();
+  };
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
+    <Dialog open={open} onClose={handleClose} fullWidth maxWidth="sm">
       <DialogTitle>Yeni Versiyon</DialogTitle>
       <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: '16px !important' }}>
+        {save.isError && (
+          <Alert severity="error">
+            {(save.error as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Versiyon oluşturulamadı.'}
+          </Alert>
+        )}
         <TextField select label="Ürün" fullWidth required value={productId} onChange={(e) => setProductId(e.target.value)}>
           {products.map((p) => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
         </TextField>
@@ -124,7 +144,7 @@ function NewVersionDialog({ open, onClose, products }: { open: boolean; onClose:
         <TextField label="Açıklama" fullWidth multiline rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>İptal</Button>
+        <Button onClick={handleClose}>İptal</Button>
         <Button variant="contained" onClick={() => save.mutate()} disabled={!productId || !version || save.isPending}>
           {save.isPending ? <CircularProgress size={18} /> : 'Oluştur'}
         </Button>

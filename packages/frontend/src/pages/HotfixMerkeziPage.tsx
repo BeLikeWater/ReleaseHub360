@@ -3,7 +3,7 @@ import {
   Box, Typography, Button, Paper, Table, TableHead, TableBody, TableRow,
   TableCell, TableContainer, Chip, IconButton, Drawer, Divider, Alert,
   CircularProgress, TextField, MenuItem, Dialog, DialogTitle, DialogContent,
-  DialogActions, Tab, Tabs,
+  DialogActions, Tab, Tabs, Stepper, Step, StepLabel,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
@@ -78,6 +78,41 @@ function HotfixDrawer({
             <Typography variant="body2" component="a" href={hotfix.prUrl} target="_blank" rel="noreferrer" color="primary">{hotfix.prUrl}</Typography>
           </Box>
         )}
+
+        {/* Multi-level Onay Zinciri */}
+        <Box>
+          <Typography variant="caption" color="text.secondary" gutterBottom display="block">Onay Geçmişi</Typography>
+          {(() => {
+            const sev = hotfix?.severity ?? '';
+            const steps = sev === 'CRITICAL'
+              ? ['Tech Lead', 'Release Manager', 'CTO']
+              : sev === 'HIGH'
+                ? ['Tech Lead', 'Release Manager']
+                : ['Release Manager'];
+            const isApproved = hotfix?.status === 'APPROVED' || hotfix?.status === 'IN_PROGRESS' || hotfix?.status === 'DEPLOYED';
+            const activeStep = isApproved ? steps.length : 0;
+            return (
+              <Stepper activeStep={activeStep} orientation="vertical" sx={{ mt: 0.5 }}>
+                {steps.map((label) => (
+                  <Step key={label} completed={isApproved}>
+                    <StepLabel
+                      error={hotfix?.status === 'REJECTED'}
+                      optional={
+                        hotfix?.status === 'REJECTED' && label === steps[0]
+                          ? <Typography variant="caption" color="error">Reddedildi</Typography>
+                          : !isApproved && label === steps[0]
+                            ? <Typography variant="caption" color="text.secondary">Onay bekleniyor</Typography>
+                            : undefined
+                      }
+                    >
+                      {label}
+                    </StepLabel>
+                  </Step>
+                ))}
+              </Stepper>
+            );
+          })()}
+        </Box>
 
         {hotfix?.status === 'PENDING' && (
           <Box sx={{ display: 'flex', gap: 1, pt: 1 }}>

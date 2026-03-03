@@ -3,13 +3,15 @@
 **Route:** `/release-todos`  
 **Kategori:** Management (Admin)  
 **Öncelik:** P2  
-**Kaynak:** ReleaseTodoManagement.js
+**Kaynak:** ReleaseTodosPage.tsx
+
+> ⚠️ **Mimari Karar:** Bu ekran sadece **tanımlama** ekranıdır. Todo'ların "tamamlandı" olarak işaretlenmesi (isCompleted toggle) **Customer Dashboard** ekranında yapılır — çünkü tamamı müşteri tarafından gerçekleştirilmesi gereken adımlardır. Bu ekranda ve Release Health Check ekranında checkbox / tamamlama izleme yoktur.
 
 ---
 
 ## Amaç
 
-Release checklist şablonlarını yönet. Her versiyon için hangi adımların tamamlanması gerektiğini belirle. Şablonlar, Release Health Check ekranındaki todo listesine otomatik olarak yüklenir.
+Her ürün versiyonu için release checklist todo'larını tanımla ve yönet (CRUD). Hangi adımların tamamlanması gerektiğini belirle — tamamlama ise Customer Dashboard'da müşteri tarafından işaretlenir.
 
 ---
 
@@ -17,44 +19,40 @@ Release checklist şablonlarını yönet. Her versiyon için hangi adımların t
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ Release Todo Yönetimi                                [+ Yeni Şablon] [+ Todo]│
+│ Release Todo Yönetimi                                                        │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  [ Ürün Seç ▾ ]    [ Versiyon Seç ▾ ]                     [+ Todo Ekle]     │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│ ┌─ Şablonlar ──────────────────┐  ┌─ Şablon Detayı ──────────────────────┐  │
-│ │                              │  │ Şablon: Standart Release Şablonu     │  │
-│ │ ● Standart Release  (12 todo)│  │ Açıklama: Tüm major/minor versiyonlar│  │
-│ │ ○ Hotfix Release    (5 todo) │  │                                       │  │
-│ │ ○ Beta Release      (8 todo) │  │ [+ Todo Ekle]                        │  │
-│ │ ○ Emergency         (3 todo) │  │                                       │  │
-│ │                              │  │ ┌─ Teknik ─────────────────────────┐ │  │
-│ │                              │  │ │ ☐ PR'lar code review tamamlandı  │ │  │
-│ │                              │  │ │ ☐ Unit testler %80+ geçiyor      │ │  │
-│ │                              │  │ │ ☐ Integration testler OK         │ │  │
-│ │                              │  │ │ ☐ Performance testi yapıldı      │ │  │
-│ │                              │  │ └───────────────────────────────────┘ │  │
-│ │                              │  │                                       │  │
-│ │                              │  │ ┌─ Operasyonel ─────────────────────┐ │  │
-│ │                              │  │ │ ☐ Database migration hazır       │ │  │
-│ │                              │  │ │ ☐ Rollback planı belgelendi      │ │  │
-│ │                              │  │ └───────────────────────────────────┘ │  │
-│ │                              │  │                                       │  │
-│ │                              │  │ ┌─ İletişim ────────────────────────┐ │  │
-│ │                              │  │ │ ☐ Release notes hazırlandı       │ │  │
-│ │                              │  │ │ ☐ Müşterilere bildirim gönderildi│ │  │
-│ │                              │  │ └───────────────────────────────────┘ │  │
-│ └──────────────────────────────┘  └───────────────────────────────────────┘  │
+│ ┌─ 🔧 Teknik ──────────────────────────────────────────────────────────────┐ │
+│ │  PR'lar code review tamamlandı   🔴P0  PRE         [✎] [🗑]            │ │
+│ │  Unit testler %80+ geçiyor       🟠P1  PRE         [✎] [🗑]            │ │
+│ │  Integration testler OK          🔵P2  DURING      [✎] [🗑]            │ │
+│ └──────────────────────────────────────────────────────────────────────────┘ │
+│                                                                              │
+│ ┌─ ⚙️ Operasyonel ─────────────────────────────────────────────────────────┐ │
+│ │  Database migration hazır        🟠P1  PRE         [✎] [🗑]            │ │
+│ │  Rollback planı belgelendi       🔵P2  PRE         [✎] [🗑]            │ │
+│ └──────────────────────────────────────────────────────────────────────────┘ │
+│                                                                              │
+│ ┌─ 📢 İletişim ────────────────────────────────────────────────────────────┐ │
+│ │  Release notes hazırlandı        🔵P2  POST        [✎] [🗑]            │ │
+│ └──────────────────────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
+
+> Checkbox yok — tamamlama işareti Customer Dashboard'dadır.
 
 ---
 
 ## İşlevler
 
-- **Şablon CRUD:** Yeni şablon oluştur, kopyala, düzenle, sil
-- **Todo CRUD:** Şablon içine todo ekle, düzenle, sil, sırala
-- **Kategori:** Her todo bir kategoriye ait (Teknik, Operasyonel, İletişim, Onay)
-- **Öncelik:** P0 (blocker) / P1 / P2 — P0 tamamlanmadan deployment aktif değil
-- **Şablonu Versiyona Uygula:** Release sırasında şablon seçilir → todolar o versiyona kopyalanır
+- **Ürün + Versiyon Seçimi:** Dropdown seçimleriyle belirli bir versiyonun todo'larını görüntüle
+- **Todo CRUD:** Todo ekle, düzenle, sil
+- **Kategori:** `TECHNICAL` / `OPERATIONAL` / `COMMUNICATION` / `APPROVAL`
+- **Öncelik:** P0 (blocker) / P1 (yüksek) / P2 (orta) / P3 (düşük)
+- **Zamanlama:** PRE / DURING / POST (deployment'a göre ne zaman yapılacak)
+- **Gruplama:** Todo'lar kategoriye göre gruplanır
 
 ---
 
@@ -62,19 +60,21 @@ Release checklist şablonlarını yönet. Her versiyon için hangi adımların t
 
 | Endpoint | Kullanım |
 |---|---|
-| `GET /api/todo-templates` | Şablon listesi |
-| `POST /api/todo-templates` | Yeni şablon |
-| `GET /api/todo-templates/:id/items` | Şablon todoları |
-| `POST /api/todo-templates/:id/items` | Todo ekle |
-| `PUT /api/todo-templates/:id/items/:itemId` | Güncelle |
-| `DELETE /api/todo-templates/:id/items/:itemId` | Sil |
-| `POST /api/product-versions/:id/apply-template` | Versiyona uygula |
+| `GET /api/products` | Ürün listesi |
+| `GET /api/product-versions?productId=x` | Versiyonlar |
+| `GET /api/release-todos?versionId=x` | Todo listesi |
+| `POST /api/release-todos` | Todo ekle |
+| `PATCH /api/release-todos/:id` | Todo güncelle |
+| `DELETE /api/release-todos/:id` | Todo sil |
+
+> `PATCH /api/release-todos/:id` → `{ isCompleted }` payload'u Customer Dashboard tarafından kullanılır.
 
 ---
 
 ## Tasarım Notları
 
-- Sol panel: `width: 260px` — liste
-- Sağ panel: `flex: 1` — detay
-- Todo sıralaması: drag & drop (`react-beautiful-dnd`)
-- P0 todo'lar: kırmızı etiket `🔴 Blocker`
+- Ürün seçilmeden versiyon dropdown disabled
+- Versiyon seçilmeden todo listesi ve "Todo Ekle" butonu görünmez
+- Todo'lar `sortOrder` alanına göre sıralanır
+- P0 todo'lar kırmızı chip `🔴 P0`
+- **Bu ekranda tamamlama checkbox'ı yoktur** — Customer Dashboard'a aittir

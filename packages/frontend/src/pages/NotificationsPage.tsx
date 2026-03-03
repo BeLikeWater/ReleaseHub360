@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Tabs, Tab, Button, List, ListItem, ListItemText,
   ListItemIcon, Chip, CircularProgress, Stack, Paper, Divider,
@@ -22,7 +23,7 @@ interface Notification {
   message: string;
   isRead: boolean;
   createdAt: string;
-  link?: string;
+  linkUrl?: string | null;
 }
 
 const typeIcon = (type: Notification['type']) => {
@@ -72,6 +73,7 @@ function groupByDate(notifications: Notification[]) {
 }
 
 export default function NotificationsPage() {
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const [tab, setTab] = useState(0);
 
@@ -167,7 +169,10 @@ export default function NotificationsPage() {
                           '&:hover': { bgcolor: 'action.hover' },
                           transition: 'background-color 0.15s',
                         }}
-                        onClick={() => { if (!n.isRead) readMutation.mutate(n.id); }}
+                        onClick={() => {
+                          if (!n.isRead) readMutation.mutate(n.id);
+                          if (n.linkUrl) navigate(n.linkUrl);
+                        }}
                       >
                         <ListItemIcon sx={{ mt: 0.5, minWidth: 40 }}>
                           {typeIcon(n.type)}

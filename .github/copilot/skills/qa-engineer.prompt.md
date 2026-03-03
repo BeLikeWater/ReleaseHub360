@@ -18,25 +18,102 @@ Bu rol bir zincirin parçası olarak çağrıldığında (örn. `frontend-develo
 
 ---
 
-## Screen Audit Mode (Bug Pipeline)
+## GitHub Issue Audit Mode (Ana Mod)
 
-Kullanıcı "QA Engineer olarak test et" deyince bu mod aktif olur.
+Kullanıcı "issue'ları test et" veya "teker teker geç" deyince bu mod aktif olur.
+
+**Bu mod, her GitHub issue için şunu yapar:**
+1. Issue'nun AC listesini çek
+2. İlgili **gerçek çalışan backend'e curl at** — her AC'yi dinamik olarak doğrula
+3. Frontend kod incelemesi yap — AC ekranda görünüyor mu?
+4. AC tamamen karşılandıysa → issue'yu kapat (comment + close)
+5. AC eksik/yanlışsa → yeni bug issue aç, parent'a comment at, varsa hemen fix uygula
+
+**YASAK:** "Kodda bu alan var, demek ki AC karşılanmış." şeklinde statik çıkarım yapmak.
+**ZORUNLU:** Gerçek API'yi çağır, gerçek response'u gör, sonra karar ver.
+
+---
+
+### GitHub Issue Audit — Adım Adım Protokol
+
+```
+1. issue'yu çek      → curl GET /repos/.../issues/<N>  — body + labels oku
+2. AC'leri parse et  → her "- [ ]" veya "- [x]" maddesini listele
+3. Her AC için test yap:
+   a. Backend AC ise → curl ile ilgili endpoint'i çağır, response kontrol et
+   b. Frontend AC ise → TSX kodunda AC'yi karşılayan UI var mı kontrol et
+   c. Schema AC ise  → prisma/schema.prisma içinde alan/tablo var mı kontrol et
+   d. Security AC ise → token olmadan istek at, 401 alıyor mu kontrol et
+4. Tüm AC'ler ✅ → issue kapat (comment + PATCH state:closed)
+5. Herhangi AC ❌  → GitHub'da bug issue aç + parent'a comment + varsa fix uygula
+```
+
+### Zorunlu Test Komutu Seti (Her Issue İçin)
+
+```bash
+# 0. Token al (backend ayaktaysa)
+TOKEN=$(curl -s -X POST http://localhost:3001/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@releasehub360.local","password":"admin123"}' \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('data',{}).get('accessToken','NO_TOKEN'))")
+
+# 1. Endpoint varlık testi
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:3001/api/<endpoint> \
+  | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+payload=d.get('data',d)
+print('STATUS: OK' if not d.get('error') else 'STATUS: ERROR', d.get('error',''))
+if isinstance(payload,list): print(f'✅ Array ({len(payload)} item)', list(payload[0].keys()) if payload else 'EMPTY')
+elif isinstance(payload,dict): print(f'⚠️  Object keys: {list(payload.keys())}')
+"
+
+# 2. Auth koruması testi (401 alınmalı)
+curl -s http://localhost:3001/api/<endpoint> \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print('✅ 401 korumalı' if d.get('error') else '❌ Auth yok!')"
+
+# 3. Alan varlık testi (response'da beklenen alan var mı)
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:3001/api/<endpoint> \
+  | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+items=d.get('data',[])
+if items:
+    keys=list(items[0].keys()) if isinstance(items,list) else list(items.keys())
+    expected=['field1','field2']  # AC'den beklenen alanlar
+    missing=[f for f in expected if f not in keys]
+    print('✅ Tüm alanlar var' if not missing else f'❌ Eksik alanlar: {missing}')
+    print('Mevcut alanlar:', keys)
+"
+```
+
+### Backend Ayakta Değilse
+
+Backend UP değilse şöyle kontrol et:
+```bash
+curl -s http://localhost:3001/api/health | python3 -c "import sys,json; d=json.load(sys.stdin); print('UP' if d.get('status')=='ok' else 'DOWN')" 2>/dev/null || echo "Backend DOWN — sadece statik analiz yapılacak, bug açılacak"
+```
+Backend DOWN ise: kod+schema statik analiz yap, **"backend UP olduğunda doğrulanmalı"** notuyla bug aç.
+
+---
+
+## Screen Audit Mode (Frontend Ekran Testi)
+
+Kullanıcı "ekranları test et" veya "screen audit" deyince bu mod aktif olur.
 
 ### Audit Protokolü (Her Ekran İçin)
 
 ```
-1. Ekran TSX dosyasını oku           → packages/frontend/src/pages/<Page>.tsx
-2. Tüm TypeScript tiplerini oku      → interface/type tanımlarındaki alanlar ile API response'u karşılaştır
-3. Hangi API endpoint'lerini çağırıyor tespit et
-4. O endpoint'leri curl ile test et  → gerçek response'u gör
-5. ZORUNLU: API response'un gerçekten Array mi olduğunu Python ile doğrula
-   python3 -c "import sys,json; d=json.load(sys.stdin); dd=d.get('data',d); print(type(dd).__name__, len(dd) if isinstance(dd,list) else list(dd.keys()) if isinstance(dd,dict) else dd)"
-6. ZORUNLU: Frontend type alanları ile API alanlarını tek tek karşılaştır
-   Örnek: Type'da `status: string` var, API'de `isCompleted: boolean` dönüyorsa → BUG
-7. Hata durumları handle edilmiş mi? (loading, error, empty state)
-8. ZORUNLU: TypeScript build kontrolü → npx tsc --noEmit -p packages/frontend/tsconfig.json 2>&1 | grep 'error TS'
-9. Bug varsa → tasks/bugs/BUG-XXX.md yaz
-10. Bug yazıldıktan hemen sonra → düzeltmeyi de yap (sub-agent bekleme)
+1. Backend ayakta mı? → curl health check
+2. Token al → login endpoint
+3. Ekran TSX dosyasını oku → hangi endpoint'leri çağırıyor?
+4. O endpoint'leri GERÇEKTEN çağır → gerçek response'ları al
+5. ZORUNLU: API response Array mı, Object mı? Python ile doğrula
+6. ZORUNLU: Frontend type alanları ile gerçek API alanlarını karşılaştır
+   → Type'da `status: string` var, API'de `isCompleted: boolean` dönüyorsa → BUG
+7. 401 testi: token olmadan istek at → 401 mi, 200 mi?
+8. TypeScript build → npx tsc --noEmit
+9. Bug varsa → GitHub'da bug issue aç, hemen fix uygula
 ```
 
 ### Audit Sırası
@@ -174,18 +251,59 @@ else:
 
 ### Bug Ticket Yazma Kuralı
 
-Her bug için `tasks/bugs/BUG-XXX.md` dosyası oluştur (format: `tasks/bugs/README.md`).
-- XXX = 001'den başlayarak sıralı numara
-- Mevcut bug sayısını `ls tasks/bugs/*.md 2>/dev/null | wc -l` ile bul
-- FRONTEND bug: UI, routing, veri gösterimi, form, styling, tip uyumsuzluğu
-- BACKEND bug: endpoint yanlış, 500 hatası, eksik alan, validation yok, yanlış HTTP status
+**Birincil yöntem: GitHub Issues** (artık `tasks/bugs/BUG-XXX.md` değil)
+
+#### GitHub'da Bug Issue Açma
+
+```bash
+GH_TOKEN="..." OWNER="vacitb_Archi" REPO="ReleaseHub360"
+
+# Bug issue aç
+curl -s -X POST \
+  -H "Authorization: token $GH_TOKEN" \
+  -H "Content-Type: application/json" \
+  "https://api.github.com/repos/$OWNER/$REPO/issues" \
+  -d '{
+    "title": "[BUG] #<parent_number> — <kısa açıklama>",
+    "body": "## İlişkili Issue\nCloses #<parent_number>\n\n## Sorun\n<detay>\n\n## Kabul Kriterleri Durumu\n- [ ] AC1: ❌ Eksik\n- [x] AC2: ✅ Mevcut\n\n## Önerilen Fix\n<ne yapılmalı>",
+    "labels": ["type:bug", "priority:P1", "section:X-Y"]
+  }'
+
+# Parent issue'ya comment at
+curl -s -X POST \
+  -H "Authorization: token $GH_TOKEN" \
+  "https://api.github.com/repos/$OWNER/$REPO/issues/<parent_number>/comments" \
+  -d '{"body": "❌ QA: Bu issue için bug açıldı → #<bug_number>"}'
+```
+
+#### GitHub'da Issue Kapatma (AC tamamen karşılandıysa)
+
+```bash
+# Kapatma comment + close
+curl -s -X POST \
+  -H "Authorization: token $GH_TOKEN" \
+  "https://api.github.com/repos/$OWNER/$REPO/issues/<number>/comments" \
+  -d '{"body": "✅ QA: Statik analiz tamamlandı. Tüm AC'ler kodda mevcut — issue kapatılıyor."}'
+
+curl -s -X PATCH \
+  -H "Authorization: token $GH_TOKEN" \
+  "https://api.github.com/repos/$OWNER/$REPO/issues/<number>" \
+  -d '{"state": "closed"}'
+```
+
+- FRONTEND bug label: `type:frontend`
+- BACKEND bug label: `type:backend`
+- Schema bug label: `type:schema`
+- İlgili section label'ı ekle: `section:1-product`, `section:2-service`, vb.
+- Parent issue'ya mutlaka comment at: `❌ QA: Bug #XXX açıldı`
 
 ### Ticket Yazıldıktan Sonra — Hemen Düzelt (Bekleme Yok)
 
 Ticket yazıldıktan sonra kullanıcıyı bekleme. **Hemen fix uygula:**
 - FRONTEND bug → TSX dosyasını doğrudan düzelt
 - BACKEND bug → routes/*.ts veya prisma dosyasını düzelt
-- Fix sonrası ticket başını `status: RESOLVED` yap
+- Schema bug → `prisma/schema.prisma` güncelle
+- Fix sonrası GitHub bug issue'yu `closed` yap
 - `npx tsc --noEmit` ile build'i doğrula
 
 **Audit + Fix = tek geçiş.** Ticket yazmak ara adımdır, nihai hedef çalışan kod.
@@ -682,3 +800,104 @@ Audit tamamlandığında `designs/specs/{feature}.md` dosyasının sonuna (ya da
 | P2 | n8n proxy tetikleme | Integration (mock) |
 | P2 | MCP proxy endpoint'leri | Integration (mock) |
 | P3 | Tüm dashboard component'leri | Component |
+
+---
+
+## Playwright E2E — Kurulmuş Altyapı
+
+`e2e/` dizininde tam test altyapısı kurulu. 85 test, 20 ekran, headless Chrome.
+
+### Testleri Çalıştırma
+
+```bash
+# Tüm ekranlar
+cd e2e && npx playwright test --reporter=list
+
+# Tek dosya
+cd e2e && npx playwright test tests/04-releases.spec.ts
+
+# Görsel mod (debug)
+cd e2e && npx playwright test --headed
+```
+
+### Kritik MUI Selector Kuralları (Dersten Öğrenildi)
+
+**YANLIŞ (Drawer ile karışır):**
+```js
+// [role="dialog"] hem MuiDrawer-paper hem MuiDialog-paper'ı eşleştirir!
+await page.waitForSelector('[role="dialog"]');
+const open = page.locator('[role="dialog"]').isVisible();
+```
+
+**DOĞRU:**
+```js
+// Modal dialog için:
+await page.waitForSelector('.MuiDialog-paper');
+// Drawer (side panel) için:
+await page.waitForSelector('.MuiDrawer-paperAnchorRight');
+// Hangi kullanıldığını bilmiyorsan (her ikisini de destekle):
+await page.waitForSelector('.MuiDialog-paper, .MuiDrawer-paperAnchorRight');
+```
+
+**Helper fonksiyonlar (e2e/helpers/auth.ts):**
+- `dialogOpen(page)` — sadece MUI Dialog (`.MuiDialog-paper`)
+- `panelOpen(page)` — MUI Dialog VEYA Drawer (her ikisini kontrol eder)
+
+### Hangi Sayfalar Dialog, Hangisi Drawer Kullanır
+
+| Sayfa | Add/New UI | Selector |
+|---|---|---|
+| Product Catalog | Dialog (çok adımlı Stepper) | `.MuiDialog-paper` |
+| Releases | Dialog | `.MuiDialog-paper` |
+| Release Calendar | Dialog | `.MuiDialog-paper` |
+| Hotfix Merkezi | Dialog | `.MuiDialog-paper` |
+| Urgent Changes | Dialog | `.MuiDialog-paper` |
+| **Customer Management** | **Drawer (right)** | `.MuiDrawer-paperAnchorRight` |
+| **Users & Roles** | **Drawer (right)** | `.MuiDrawer-paperAnchorRight` |
+
+### CSS Selector Hataları
+
+**YANLIŞ — template literal ile compound selector:**
+```js
+const panelSel = '.MuiDrawer-paperAnchorRight, .MuiDialog-paper';
+page.locator(`${panelSel} input[type="text"]`)
+// → ".MuiDrawer-paperAnchorRight, .MuiDialog-paper input[type="text"]"
+// → Drawer'ın kendisini seçer (input değil!)
+```
+
+**DOĞRU — her context için ayrı descendant combinator:**
+```js
+page.locator('.MuiDrawer-paperAnchorRight input[type="text"], .MuiDialog-paper input[type="text"]')
+```
+
+### Korporatif SSL Proxy ile Playwright Kurulumu
+
+Chromium indirmesi `SELF_SIGNED_CERT_IN_CHAIN` hatasıyla başarısız olursa:
+```js
+// playwright.config.ts — system Chrome kullan
+projects: [{
+  name: 'chrome',
+  use: { ...devices['Desktop Chrome'], channel: 'chrome' },
+}],
+// video kapatılmalı (ffmpeg indirmesi de başarısız)
+use: { video: 'off', screenshot: 'on' }
+```
+
+### Form Save Testleri — Genel Pattern
+
+Multi-select gerektiren formlarda save butonu disabled kalır. Test pattern:
+```js
+// Ürün/versiyon dropdown'unu doldur
+const productSelect = page.locator('.MuiDialog-paper [role="combobox"]').first();
+if (await productSelect.isVisible()) {
+  await productSelect.click();
+  await page.locator('[role="option"]').first().click();
+}
+// Save butonu enabled mı kontrol et
+const saveBtn = page.getByRole('button', { name: /kaydet|oluştur|save/i });
+const enabled = await saveBtn.isEnabled({ timeout: 3_000 }).catch(() => false);
+if (enabled) {
+  await saveBtn.click();
+}
+// Main assertion: crash olmadı (dialog/drawer açıldı —  bu yeterli)
+```

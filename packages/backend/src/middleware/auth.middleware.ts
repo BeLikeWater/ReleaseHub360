@@ -6,6 +6,8 @@ export interface JwtPayload {
   email: string;
   role: string;
   name: string;
+  userType: 'ORG' | 'CUSTOMER';
+  customerId?: string; // only for CUSTOMER users
 }
 
 declare global {
@@ -45,4 +47,12 @@ export function requireRole(...roles: string[]) {
     }
     next();
   };
+}
+
+export function requireOrgUser(req: Request, res: Response, next: NextFunction): void {
+  if (!req.user || req.user.userType !== 'ORG') {
+    res.status(403).json({ error: 'Bu endpoint sadece kurum kullanıcıları içindir' });
+    return;
+  }
+  next();
 }

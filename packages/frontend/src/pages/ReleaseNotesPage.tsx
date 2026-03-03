@@ -3,12 +3,13 @@ import {
   Box, Typography, TextField, MenuItem, CircularProgress, Stack,
   Paper, Chip, Alert, Button, Divider, IconButton, Dialog,
   DialogTitle, DialogContent, DialogActions, FormControlLabel,
-  Checkbox,
+  Checkbox, List, ListItemButton, ListItemIcon, ListItemText,
 } from '@mui/material';
 import {
   Add as AddIcon,
   Delete as DeleteIcon,
   Edit as EditIcon,
+  Search as SearchIcon,
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/api/client';
@@ -35,6 +36,13 @@ interface ReleaseNote {
   sortOrder: number;
 }
 
+interface TfsWorkItem {
+  id: number;
+  title: string;
+  type: string;
+  state: string;
+}
+
 const CATEGORIES = [
   { value: 'FEATURE', label: '✨ Yeni Özellik', color: 'info' as const },
   { value: 'BUG', label: '🐛 Hata Düzeltme', color: 'error' as const },
@@ -44,10 +52,10 @@ const CATEGORIES = [
   { value: 'DEPRECATED', label: '🚫 Kullanımdan Kalktı', color: 'default' as const },
 ];
 
-const blankNote = (versionId: string): Partial<ReleaseNote> => ({
+const blankNote = (versionId: string, item?: TfsWorkItem): Partial<ReleaseNote> => ({
   productVersionId: versionId,
-  category: 'FEATURE',
-  title: '',
+  category: item?.type === 'Bug' ? 'BUG' : 'FEATURE',
+  title: item ? `[#${item.id}] ${item.title}` : '',
   description: '',
   isBreaking: false,
 });
@@ -57,6 +65,10 @@ export default function ReleaseNotesPage() {
   const [productId, setProductId] = useState('');
   const [versionId, setVersionId] = useState('');
   const [preview, setPreview] = useState(false);
+
+  // TFS Work Items sol panel
+  const [tfsSearch, setTfsSearch] = useState('');
+  const [selectedWorkItems, setSelectedWorkItems] = useState<Set<number>>(new Set());
 
   // Dialog
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -82,6 +94,13 @@ export default function ReleaseNotesPage() {
     enabled: !!versionId,
   });
 
+  const { data: tfsWorkItems = [] } = useQuery<TfsWorkItem[]>({
+    queryKey: ['tfs-work-items', versionId],
+    queryFn: () => api.get(`/tfs/work-items?versionId=${versionId}`).then((r) => r.data.data ?? r.data),
+    enabled: !!versionId,
+    retry: false,
+  });
+
   const createMutation = useMutation({
     mutationFn: (body: Partial<ReleaseNote>) => api.post('/release-notes', body).then((r) => r.data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['release-notes', versionId] }); closeDialog(); },
@@ -102,6 +121,15 @@ export default function ReleaseNotesPage() {
     mutationFn: () => api.patch(`/product-versions/${versionId}`, { notesPublished: true }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['product-versions', productId] }),
   });
+
+  const openFromWorkItem = (item: TfsWorkItem) => {
+    const checked = new Set(selectedWorkItems);
+    if (checked.has(item.id)) { checked.delete(item.id); } else { checked.add(item.id); }
+    setSelectedWorkItems(checked);
+    setEditing(null);
+    setForm(blankNote(versionId, item));
+    setDialogOpen(true);
+  };
 
   const openNew = () => {
     setEditing(null);
@@ -213,57 +241,117 @@ export default function ReleaseNotesPage() {
             </Button>
           </Stack>
 
-          {CATEGORIES.map(({ value, label }) => {
-            const categoryNotes = notes
-              .filter((n) => n.category === value)
-              .sort((a, b) => a.sortOrder - b.sortOrder);
-            if (categoryNotes.length === 0) return null;
-            return (
-              <Paper key={value} variant="outlined" sx={{ mb: 2 }}>
-                <Box px={2} py={1.5} sx={{ bgcolor: value === 'BREAKING' ? 'error.light' : 'action.hover' }}>
-                  <Typography variant="subtitle2" fontWeight={700}>
-                    {label} ({categoryNotes.length})
+          <Box display="flex" gap={2} alignItems="flex-start">
+            {/* TFS Work Items Sol Panel */}
+            <Paper variant="outlined" sx={{ width: 280, flexShrink: 0, p: 1.5, maxHeight: 600, display: 'flex', flexDirection: 'column' }}>
+              <Typography variant="subtitle2" fontWeight={700} mb={1}>Work Items (TFS)</Typography>
+              <TextField
+                size="small" fullWidth placeholder="Ara..."
+                value={tfsSearch}
+                onChange={(e) => setTfsSearch(e.target.value)}
+                InputProps={{ startAdornment: <SearchIcon fontSize="small" sx={{ mr: 0.5, color: 'text.disabled' }} /> }}
+                sx={{ mb: 1 }}
+              />
+              <List dense disablePadding sx={{ flex: 1, overflowY: 'auto' }}>
+                {tfsWorkItems
+                  .filter((wi) => {
+                    const q = tfsSearch.toLowerCase();
+                    return !q || wi.title.toLowerCase().includes(q) || String(wi.id).includes(q);
+                  })
+                  .map((wi) => (
+                    <ListItemButton
+                      key={wi.id}
+                      dense
+                      onClick={() => openFromWorkItem(wi)}
+                      sx={{ borderRadius: 1, mb: 0.25 }}
+                    >
+                      <ListItemIcon sx={{ minWidth: 32 }}>
+                        <Checkbox
+                          edge="start" size="small" disableRipple tabIndex={-1}
+                          checked={selectedWorkItems.has(wi.id)}
+                          onChange={() => {
+                            const s = new Set(selectedWorkItems);
+                            s.has(wi.id) ? s.delete(wi.id) : s.add(wi.id);
+                            setSelectedWorkItems(s);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </ListItemIcon>
+                      <ListItemText
+                        primary={`#${wi.id} ${wi.title}`}
+                        secondary={wi.type}
+                        primaryTypographyProps={{ variant: 'caption', noWrap: true }}
+                        secondaryTypographyProps={{ variant: 'caption' }}
+                      />
+                    </ListItemButton>
+                  ))}
+                {tfsWorkItems.length === 0 && (
+                  <Typography variant="caption" color="text.disabled" sx={{ px: 1, display: 'block' }}>
+                    TFS entegrasyonu yapılandırıldıktan sonra iş öğeleri burada görünür.
                   </Typography>
-                </Box>
-                <Divider />
-                {categoryNotes.map((n, idx) => (
-                  <Box key={n.id}>
-                    {idx > 0 && <Divider />}
-                    <Stack direction="row" alignItems="flex-start" px={2} py={1.5} spacing={2}>
-                      <Box flex={1}>
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <Typography variant="body2" fontWeight={500}>{n.title}</Typography>
-                          {n.isBreaking && (
-                            <Chip size="small" label="Kırıcı" color="error" sx={{ height: 18, fontSize: 10 }} />
-                          )}
-                        </Stack>
-                        {n.description && (
-                          <Typography variant="caption" color="text.secondary">{n.description}</Typography>
-                        )}
-                      </Box>
-                      <Stack direction="row" spacing={0.5}>
-                        <IconButton size="small" onClick={() => openEdit(n)}>
-                          <EditIcon fontSize="small" />
-                        </IconButton>
-                        <IconButton
-                          size="small" color="error"
-                          onClick={() => deleteMutation.mutate(n.id)}
-                        >
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      </Stack>
-                    </Stack>
-                  </Box>
-                ))}
-              </Paper>
-            );
-          })}
+                )}
+              </List>
+              <Divider sx={{ mt: 1, mb: 0.5 }} />
+              <Typography variant="caption" color="text.secondary">
+                Toplam: {tfsWorkItems.length} · Seçili: {selectedWorkItems.size}
+              </Typography>
+            </Paper>
 
-          {notes.length === 0 && (
-            <Typography color="text.secondary" align="center" py={4}>
-              Henüz release notu eklenmemiş
-            </Typography>
-          )}
+            {/* Notes List - sağ taraf */}
+            <Box flex={1}>
+              {CATEGORIES.map(({ value, label }) => {
+                const categoryNotes = notes
+                  .filter((n) => n.category === value)
+                  .sort((a, b) => a.sortOrder - b.sortOrder);
+                if (categoryNotes.length === 0) return null;
+                return (
+                  <Paper key={value} variant="outlined" sx={{ mb: 2 }}>
+                    <Box px={2} py={1.5} sx={{ bgcolor: value === 'BREAKING' ? 'error.light' : 'action.hover' }}>
+                      <Typography variant="subtitle2" fontWeight={700}>
+                        {label} ({categoryNotes.length})
+                      </Typography>
+                    </Box>
+                    <Divider />
+                    {categoryNotes.map((n, idx) => (
+                      <Box key={n.id}>
+                        {idx > 0 && <Divider />}
+                        <Stack direction="row" alignItems="flex-start" px={2} py={1.5} spacing={2}>
+                          <Box flex={1}>
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              <Typography variant="body2" fontWeight={500}>{n.title}</Typography>
+                              {n.isBreaking && (
+                                <Chip size="small" label="Kırıcı" color="error" sx={{ height: 18, fontSize: 10 }} />
+                              )}
+                            </Stack>
+                            {n.description && (
+                              <Typography variant="caption" color="text.secondary">{n.description}</Typography>
+                            )}
+                          </Box>
+                          <Stack direction="row" spacing={0.5}>
+                            <IconButton size="small" onClick={() => openEdit(n)}>
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                            <IconButton
+                              size="small" color="error"
+                              onClick={() => deleteMutation.mutate(n.id)}
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Stack>
+                        </Stack>
+                      </Box>
+                    ))}
+                  </Paper>
+                );
+              })}
+
+              {notes.length === 0 && (
+                <Typography color="text.secondary" align="center" py={4}>
+                  Henüz release notu eklenmemiş
+                </Typography>
+              )}
+            </Box>
+          </Box>
         </>
       )}
 

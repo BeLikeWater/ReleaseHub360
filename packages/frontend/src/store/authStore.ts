@@ -6,6 +6,9 @@ interface User {
   email: string;
   name: string;
   role: string;
+  userType: 'ORG' | 'CUSTOMER';
+  customerId?: string;
+  customerName?: string;
 }
 
 interface AuthState {
