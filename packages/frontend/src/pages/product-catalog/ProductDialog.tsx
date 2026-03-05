@@ -42,6 +42,7 @@ export default function ProductDialog({ open, onClose, initial }: Props) {
   const [usesReleaseBranches, setUsesReleaseBranches] = useState(false);
   const [concurrentUpdatePolicy, setConcurrentUpdatePolicy] = useState<ConcurrentUpdatePolicy | ''>('');
   const [initialVersion, setInitialVersion] = useState('v1.0.0');
+  const [createInitialVersion, setCreateInitialVersion] = useState(true);
 
   // Reset form when initial changes
   useEffect(() => {
@@ -58,6 +59,7 @@ export default function ProductDialog({ open, onClose, initial }: Props) {
     setUsesReleaseBranches(initial?.usesReleaseBranches ?? false);
     setConcurrentUpdatePolicy((initial?.concurrentUpdatePolicy ?? '') as ConcurrentUpdatePolicy | '');
     setInitialVersion('v1.0.0');
+    setCreateInitialVersion(true);
   }, [initial]);
 
   const createMut = useCreateProduct();
@@ -87,7 +89,7 @@ export default function ProductDialog({ open, onClose, initial }: Props) {
     if (isEdit && initial?.id) {
       updateMut.mutate({ ...payload, id: initial.id }, { onSuccess: onClose });
     } else {
-      createMut.mutate({ ...payload, initialVersion: initialVersion.trim() || undefined }, { onSuccess: onClose });
+      createMut.mutate({ ...payload, initialVersion: createInitialVersion ? (initialVersion.trim() || 'v1.0.0') : undefined }, { onSuccess: onClose });
     }
   };
 
@@ -184,22 +186,34 @@ export default function ProductDialog({ open, onClose, initial }: Props) {
               </Select>
             </FormControl>
 
-            {/* İlk versiyon — sadece oluşturma modunda */}
+            {/* D5-01: İlk versiyon toggle — sadece oluşturma modunda */}
             {!isEdit && (
               <>
                 <Divider />
                 <Typography variant="caption" color="text.secondary" fontWeight={600}>
                   İLK VERSİYON
                 </Typography>
-                <TextField
-                  label="Başlangıç Versiyon"
-                  fullWidth
-                  size="small"
-                  value={initialVersion}
-                  onChange={(e) => setInitialVersion(e.target.value)}
-                  placeholder="v1.0.0"
-                  helperText="Ürünle birlikte PLANNED aşamasında oluşturulur"
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={createInitialVersion}
+                      onChange={(e) => setCreateInitialVersion(e.target.checked)}
+                      color="primary"
+                    />
+                  }
+                  label="İlk versiyonu otomatik oluştur (v1.0.0)"
                 />
+                {createInitialVersion && (
+                  <TextField
+                    label="Başlangıç Versiyon"
+                    fullWidth
+                    size="small"
+                    value={initialVersion}
+                    onChange={(e) => setInitialVersion(e.target.value)}
+                    placeholder="v1.0.0"
+                    helperText="Ürünle birlikte PLANNED aşamasında oluşturulur"
+                  />
+                )}
               </>
             )}
           </>

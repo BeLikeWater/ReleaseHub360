@@ -195,6 +195,112 @@ async function main() {
     ],
   });
 
+  // ── L-01: Yeni OrgRole ve CustomerRole kullanıcıları ──────────────────────
+  const po = await prisma.user.upsert({
+    where: { email: 'po@releasehub360.local' },
+    update: {},
+    create: { email: 'po@releasehub360.local', passwordHash, name: 'Product Owner', role: 'PRODUCT_OWNER' },
+  });
+  const devops = await prisma.user.upsert({
+    where: { email: 'devops@releasehub360.local' },
+    update: {},
+    create: { email: 'devops@releasehub360.local', passwordHash, name: 'DevOps Engineer', role: 'DEVOPS_ENGINEER' },
+  });
+  const qa = await prisma.user.upsert({
+    where: { email: 'qa@releasehub360.local' },
+    update: {},
+    create: { email: 'qa@releasehub360.local', passwordHash, name: 'QA Engineer', role: 'QA_ENGINEER' },
+  });
+  console.log('✅ Extended OrgRole users:', [po.email, devops.email, qa.email]);
+
+  // CustomerUser seeds (CUSTOMER_ADMIN + APP_ADMIN for ACME demo)
+  const customerPasswordHash = await bcrypt.hash('customer123', 10);
+  await prisma.customerUser.upsert({
+    where: { email: 'admin@acme.com' },
+    update: {},
+    create: {
+      id: 'cu-acme-admin',
+      email: 'admin@acme.com',
+      name: 'ACME Admin',
+      customerRole: 'CUSTOMER_ADMIN',
+      customerId: c1.id,
+      passwordHash: customerPasswordHash,
+      isActive: true,
+    },
+  });
+  await prisma.customerUser.upsert({
+    where: { email: 'appuser@acme.com' },
+    update: {},
+    create: {
+      id: 'cu-acme-app',
+      email: 'appuser@acme.com',
+      name: 'ACME App User',
+      customerRole: 'APP_ADMIN',
+      customerId: c1.id,
+      passwordHash: customerPasswordHash,
+      isActive: true,
+    },
+  });
+  await prisma.customerUser.upsert({
+    where: { email: 'approver@beta.tech' },
+    update: {},
+    create: {
+      id: 'cu-beta-approver',
+      email: 'approver@beta.tech',
+      name: 'Beta Approver',
+      customerRole: 'APPROVER',
+      customerId: c2.id,
+      passwordHash: customerPasswordHash,
+      isActive: true,
+    },
+  });
+  console.log('✅ CustomerUser seeds created');
+
+  // ── L-02: DORA benchmark eşikleri ─────────────────────────────────────────
+  await prisma.setting.createMany({
+    skipDuplicates: true,
+    data: [
+      // Deploy Frequency thresholds (deploys/week: Elite ≥ 7, High ≥ 1, Medium ≥ 0.25, Low < 0.25)
+      { key: 'dora.df.eliteThreshold', value: '7', category: 'DORA' },
+      { key: 'dora.df.highThreshold', value: '1', category: 'DORA' },
+      { key: 'dora.df.mediumThreshold', value: '0.25', category: 'DORA' },
+      // Lead Time thresholds (hours: Elite < 24h, High < 168h, Medium < 720h, Low > 720h)
+      { key: 'dora.lt.eliteThreshold', value: '24', category: 'DORA' },
+      { key: 'dora.lt.highThreshold', value: '168', category: 'DORA' },
+      { key: 'dora.lt.mediumThreshold', value: '720', category: 'DORA' },
+      // Change Failure Rate thresholds (Elite < 5%, High < 10%, Medium < 15%)
+      { key: 'dora.cfr.eliteThreshold', value: '0.05', category: 'DORA' },
+      { key: 'dora.cfr.highThreshold', value: '0.10', category: 'DORA' },
+      { key: 'dora.cfr.mediumThreshold', value: '0.15', category: 'DORA' },
+      // MTTR thresholds (hours: Elite < 1h, High < 24h, Medium < 168h)
+      { key: 'dora.mttr.eliteThreshold', value: '1', category: 'DORA' },
+      { key: 'dora.mttr.highThreshold', value: '24', category: 'DORA' },
+      { key: 'dora.mttr.mediumThreshold', value: '168', category: 'DORA' },
+    ],
+  });
+  console.log('✅ DORA benchmark thresholds seeded');
+
+  // ── L-03: UserProductAccess — Admin dışı kullanıcılara ürün erişimi ────────
+  await prisma.userProductAccess.createMany({
+    skipDuplicates: true,
+    data: [
+      // Release Manager → her iki ürün
+      { userId: rm.id, productId: erpProduct.id },
+      { userId: rm.id, productId: portalProduct.id },
+      // Developer → yalnızca ERP
+      { userId: dev.id, productId: erpProduct.id },
+      // Product Owner → her iki ürün
+      { userId: po.id, productId: erpProduct.id },
+      { userId: po.id, productId: portalProduct.id },
+      // DevOps → her iki ürün
+      { userId: devops.id, productId: erpProduct.id },
+      { userId: devops.id, productId: portalProduct.id },
+      // QA → yalnızca Portal
+      { userId: qa.id, productId: portalProduct.id },
+    ],
+  });
+  console.log('✅ UserProductAccess seed data created');
+
   console.log('🎉 Seed tamamlandı!');
   console.log('\n📋 Demo hesaplar:');
   console.log('  admin@releasehub360.local / admin123  (ADMIN)');

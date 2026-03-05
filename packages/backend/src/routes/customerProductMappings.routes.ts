@@ -70,12 +70,49 @@ router.get('/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ─── Helper: GIT_SYNC CPM kaydedilince CustomerBranch otomatik oluştur ────────
+async function ensureCustomerBranch(customerId: string, productId: string, branchName: string) {
+  // Ürünün servislerini bul (repoName eşleştirmek için)
+  const services = await prisma.service.findMany({
+    where: { productId, repoName: { not: null } },
+    select: { repoName: true },
+  });
+
+  if (services.length > 0) {
+    // Her servisin repoName'i ile eşleşen CustomerBranch kaydı yoksa oluştur
+    for (const svc of services) {
+      const exists = await prisma.customerBranch.findFirst({
+        where: { customerId, branchName, repoName: svc.repoName! },
+      });
+      if (!exists) {
+        await prisma.customerBranch.create({
+          data: { customerId, branchName, repoName: svc.repoName! },
+        });
+      }
+    }
+  } else {
+    // Servis repoName'i yoksa repoName'siz oluştur
+    const exists = await prisma.customerBranch.findFirst({
+      where: { customerId, branchName, repoName: null },
+    });
+    if (!exists) {
+      await prisma.customerBranch.create({ data: { customerId, branchName } });
+    }
+  }
+}
+
 // POST /api/customer-product-mappings
 router.post('/', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req, res, next) => {
   try {
     const data = schema.parse(req.body);
+    // productId: productVersionId üzerinden otomatik türet
+    const pv = await prisma.productVersion.findUnique({
+      where: { id: data.productVersionId },
+      select: { productId: true },
+    });
+    if (!pv) throw new AppError(404, 'Ürün versiyonu bulunamadı');
     const item = await prisma.customerProductMapping.create({
-      data,
+      data: { ...data, productId: pv.productId },
       include: {
         customer: { select: { id: true, name: true, code: true } },
         productVersion: {
@@ -86,6 +123,12 @@ router.post('/', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req, res, next)
         },
       },
     });
+
+    // GIT_SYNC + branch doluysa CustomerBranch kaydını otomatik oluştur
+    if (item.artifactType === 'GIT_SYNC' && item.branch) {
+      await ensureCustomerBranch(item.customerId, pv.productId, item.branch);
+    }
+
     res.status(201).json({ data: item });
   } catch (err) { next(err); }
 });
@@ -107,6 +150,12 @@ router.put('/:id', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req, res, nex
         },
       },
     });
+
+    // GIT_SYNC + branch doluysa CustomerBranch kaydını otomatik oluştur/tamamla
+    if (item.artifactType === 'GIT_SYNC' && item.branch) {
+      await ensureCustomerBranch(item.customerId, item.productId, item.branch);
+    }
+
     res.json({ data: item });
   } catch (err) { next(err); }
 });

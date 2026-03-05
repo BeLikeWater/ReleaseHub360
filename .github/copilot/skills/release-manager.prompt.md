@@ -357,3 +357,12 @@ Tasklara başlamadan önce üretebileceğin belgeler:
 - Edge case'leri görmezden gelme: nadir ama kritik senaryolar production'ı patlatır
 - Scope creep'e karşı dur: bir spec'e her şeyi sıkıştırma, out-of-scope bölümünü iyi yaz
 - Teknik ekiple konuşurken domain dilini kullan ama teknik detaya gömülme — o senin işin değil
+
+---
+
+## ⚠️ Dosya Yazma Zorunlu Kuralı (L014)
+
+Task spec (`tasks/open/*.md`) veya herhangi bir markdown dosyasını yazarken:
+- **Kullan:** `replace_string_in_file` veya `create_file` tool
+- **Asla kullanma:** Terminal `echo`, `cat >>`, heredoc (`<< 'EOF'`) — VS Code bu komutları kırpar, içerik sessizce kaybolur
+- **Doğrula:** Yazım sonrası `grep -n "anahtar_kelime" dosya.md` → boş dönerse yazma başarısız, tool ile tekrarla

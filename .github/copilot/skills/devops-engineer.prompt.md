@@ -387,3 +387,12 @@ Grafana dashboard'ları: API latency, hata oranı, DB bağlantı havuzu, aktif k
 - `latest` tag production image'larında kullanılmaz — her zaman `sha` veya semantik versiyon
 - `docker-compose.jaeger.yml` mevcut Jaeger yapılandırması ile çelişme, `docker-compose.yml`'e entegre et
 - Database migration'ları backend container başlarken otomatik çalışır (`prisma migrate deploy`)
+
+---
+
+## ⚠️ Dosya Yazma Zorunlu Kuralı (L014)
+
+Herhangi bir markdown veya config dosyasını yazarken / güncellerken:
+- **Kullan:** `replace_string_in_file` veya `create_file` tool
+- **Asla kullanma:** Terminal `echo`, `cat >>`, heredoc (`<< 'EOF'`) — VS Code bu komutları kırpar, içerik sessizce kaybolur
+- **Doğrula:** Yazım sonrası `grep -n "anahtar_kelime" dosya.md` → boş dönerse yazma başarısız, tool ile tekrarla

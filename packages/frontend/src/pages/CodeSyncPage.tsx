@@ -15,6 +15,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import apiClient from '@/api/client';
+import { useAuthStore } from '@/store/authStore';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -83,6 +84,9 @@ type DeltaParams = { sourceVersionId: string; targetVersionId: string; serviceId
 export default function CodeSyncPage() {
   const qc = useQueryClient();
   const [tab, setTab] = useState(0);
+  const user = useAuthStore((s) => s.user);
+  // CUSTOMER kullanıcısı → kendi müşterisinin branch'larını filtrele
+  const customerIdFilter = user?.userType === 'CUSTOMER' ? user.customerId : undefined;
 
   // Context selectors
   const [selectedProductId, setSelectedProductId] = useState('');
@@ -119,8 +123,10 @@ export default function CodeSyncPage() {
     enabled: !!selectedProductId,
   });
   const { data: customerBranches = [] } = useQuery<CustomerBranch[]>({
-    queryKey: ['customer-branches-for-sync', selectedServiceId],
-    queryFn: () => apiClient.get('/code-sync/customer-branches', { params: { serviceId: selectedServiceId } }).then(r => r.data.data ?? r.data),
+    queryKey: ['customer-branches-for-sync', selectedServiceId, customerIdFilter],
+    queryFn: () => apiClient.get('/code-sync/customer-branches', {
+      params: { serviceId: selectedServiceId, ...(customerIdFilter ? { customerId: customerIdFilter } : {}) },
+    }).then(r => r.data.data ?? r.data),
     enabled: !!selectedServiceId,
   });
 

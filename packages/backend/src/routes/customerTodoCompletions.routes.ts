@@ -52,7 +52,7 @@ router.get('/', async (req, res, next) => {
     // Fetch todos for this version
     const todos = await prisma.releaseTodo.findMany({
       where: { productVersionId: String(versionId) },
-      orderBy: [{ timing: 'asc' }, { sortOrder: 'asc' }, { priority: 'asc' }],
+      orderBy: [{ phase: 'asc' }, { sortOrder: 'asc' }, { priority: 'asc' }],
     });
 
     // Fetch completion records for this customer + version

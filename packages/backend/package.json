@@ -18,14 +18,22 @@
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
+    "@types/multer": "^2.0.0",
+    "@types/nodemailer": "^7.0.11",
+    "archiver": "^7.0.1",
+    "basic-ftp": "^5.2.0",
     "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
+    "multer": "^2.1.0",
+    "nodemailer": "^8.0.1",
+    "xlsx": "^0.18.5",
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@types/archiver": "^7.0.0",
     "@types/bcrypt": "^5.0.2",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",

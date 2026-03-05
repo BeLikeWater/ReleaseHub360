@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../lib/prisma';
-import { authenticateJWT, requireRole } from '../middleware/auth.middleware';
+import { authenticateJWT, requireRole, filterByUserProducts } from '../middleware/auth.middleware';
 import { AppError } from '../middleware/errorHandler.middleware';
 
 const router = Router();
 router.use(authenticateJWT);
+router.use(filterByUserProducts);
 
 const schema = z.object({
   title: z.string().min(1),
@@ -26,6 +27,11 @@ router.get('/', async (req, res, next) => {
     const { versionId, productId, isBreaking } = req.query;
 
     const where: Record<string, unknown> = {};
+
+    // B2-03: Ürün erişim filtresi
+    if (req.accessibleProductIds) {
+      where.productVersion = { productId: { in: req.accessibleProductIds } };
+    }
 
     if (versionId) {
       where.productVersionId = String(versionId);

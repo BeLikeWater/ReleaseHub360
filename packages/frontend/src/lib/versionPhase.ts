@@ -6,7 +6,7 @@ export type VersionForPhase = {
   releaseDate?: string | null;
   targetDate?: string | null;
   preProdDate?: string | null;
-  testDate?: string | null;
+  testStartDate?: string | null;
 };
 
 // ── Stored phase constants ────────────────────────────────────────────────────
@@ -28,18 +28,18 @@ export const NEXT_PHASE: Record<string, string | null> = {
 // ── Phase display metadata ────────────────────────────────────────────────────
 export const PHASE_META: Record<string, { label: string; color: 'default' | 'info' | 'warning' | 'success' | 'error' }> = {
   // Stored DB phase values
-  PLANNED:     { label: 'Planlı',          color: 'default'  },
-  DEVELOPMENT: { label: 'Geliştirme',      color: 'info'     },
-  RC:          { label: 'RC',              color: 'warning'  },
-  STAGING:     { label: 'Staging',         color: 'warning'  },
-  PRODUCTION:  { label: 'Yayında',         color: 'success'  },
-  ARCHIVED:    { label: 'Arşiv',           color: 'default'  },
+  PLANNED:     { label: 'Henüz Başlanmadı', color: 'default'  },
+  DEVELOPMENT: { label: 'Geliştirme',       color: 'info'     },
+  RC:          { label: 'Test',             color: 'warning'  },
+  STAGING:     { label: 'Test',             color: 'warning'  },
+  PRODUCTION:  { label: 'Yayında',          color: 'success'  },
+  ARCHIVED:    { label: 'Arşiv',            color: 'default'  },
   // Legacy computed keys (backward compat for date-based computation)
-  DEV:         { label: 'Dev',             color: 'info'     },
-  TEST:        { label: 'Test',            color: 'warning'  },
-  PREP:        { label: 'Prep',            color: 'warning'  },
-  WAITING:     { label: 'Yayın Bekliyor',  color: 'error'    },
-  PROD:        { label: 'Prod',            color: 'success'  },
+  DEV:         { label: 'Geliştirme',       color: 'info'     },
+  TEST:        { label: 'Test',             color: 'warning'  },
+  PREP:        { label: 'Test',             color: 'warning'  },
+  WAITING:     { label: 'Yayın Bekliyor',   color: 'error'    },
+  PROD:        { label: 'Yayında',          color: 'success'  },
 };
 
 /**
@@ -55,8 +55,8 @@ export function computePhase(v: VersionForPhase): string {
   if (v.releaseDate || v.phase === 'PRODUCTION') return 'PRODUCTION';
   const now = new Date();
   const tgt  = v.targetDate  ? new Date(v.targetDate)  : null;
-  const prep = v.preProdDate ? new Date(v.preProdDate) : null;
-  const test = v.testDate    ? new Date(v.testDate)    : null;
+  const prep = v.preProdDate  ? new Date(v.preProdDate)  : null;
+  const test = v.testStartDate ? new Date(v.testStartDate) : null;
   if (tgt  && now >= tgt)  return 'STAGING';
   if (prep && now >= prep) return 'RC';
   if (test && now >= test) return 'DEVELOPMENT';

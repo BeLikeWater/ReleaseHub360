@@ -47,6 +47,8 @@ model Product {
 
   // ── Visibility ──
   customerVisibleStatuses String[]         @default(["RELEASED"])
+  staleThresholdWarning   Int              @default(3)  // kaç release geride iken ⚠️ uyarı
+  staleThresholdCritical  Int              @default(5)  // kaç release geride iken 🔴 kritik
 
   // ── Deprecated (Faz 1 migration — kaldırılacak) ──
   repoUrl                 String?          // @deprecated — artık azureOrg+project+repoName ile hesaplanır
@@ -64,6 +66,7 @@ model Product {
   metricSnapshots         MetricSnapshot[]
   environments            Environment[]
   cpmDirect               CustomerProductMapping[] @relation("CpmProduct")
+  customerServiceVersions CustomerServiceVersion[]
 
   @@map("products")
 }
@@ -124,6 +127,7 @@ model Service {
   releaseSnapshots        ServiceReleaseSnapshot[]
   module                  Module?                  @relation(fields: [moduleId], references: [id])
   product                 Product                  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  customerServiceVersions CustomerServiceVersion[]
 
   @@map("services")
 }
@@ -185,9 +189,9 @@ model ProductVersion {
   createdAt        DateTime                 @default(now())
   updatedAt        DateTime                 @updatedAt
   isHotfix         Boolean                  @default(false)
-  masterStartDate  DateTime?
-  preProdDate      DateTime?
-  testDate         DateTime?
+  devStartDate     DateTime?                      @map("masterStartDate") // A2-01: eski masterStartDate
+  preProdDate      DateTime?                      // @deprecated — design'da yok, frontend migrasyon sonrası kaldırılacak
+  testStartDate    DateTime?                      @map("testDate")        // A2-02: eski testDate
   deprecatedAt     DateTime?
   actualReleaseDate DateTime?                      // gerçek yayınlanma tarihi (RELEASED geçişinde set edilir)
   gitSyncRef       String?                        // branch name veya tag name
@@ -211,6 +215,7 @@ model ProductVersion {
   approvalLogs     ApprovalLog[]
   healthChecks     HealthCheck[]
   currentForMappings CustomerProductMapping[] @relation("CpmCurrentVersion")
+  customerServiceVersions CustomerServiceVersion[]
 
   @@unique([productId, version])
   @@map("product_versions")
@@ -228,6 +233,8 @@ model ReleaseNote {
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
   workitemId       String?
+  source           String         @default("MANUAL")   // MANUAL | AZURE_FIELD | AI_GENERATED
+  isNotRequired    Boolean        @default(false)       // "Bu WI için release note gerekmez" işaretleme
   productVersion   ProductVersion @relation(fields: [productVersionId], references: [id], onDelete: Cascade)
 
   @@map("release_notes")
@@ -293,10 +300,11 @@ model Customer {
   branches             CustomerBranch[]
   productMappings      CustomerProductMapping[]
   serviceMappings      CustomerServiceMapping[]
-  versionTransitions   CustomerVersionTransition[]
-  transitionIssues     TransitionIssue[]
-  todoCompletions      CustomerTodoCompletion[]
-  customerUsers        CustomerUser[]
+  versionTransitions      CustomerVersionTransition[]
+  transitionIssues        TransitionIssue[]
+  todoCompletions         CustomerTodoCompletion[]
+  customerUsers           CustomerUser[]
+  customerServiceVersions CustomerServiceVersion[]
 
   @@map("customers")
 }
@@ -304,7 +312,7 @@ model Customer {
 model CustomerProductMapping {
   id               String         @id @default(uuid())
   customerId       String
-  productVersionId String
+  productVersionId String?
   branch           String?
   environment      String?
   notes            String?
@@ -328,6 +336,13 @@ model CustomerProductMapping {
   helmValuesOverrides   Json?
   helmRepoUrl           String?
 
+  // ── FTP (Binary artifact müşterileri için) ──
+  binaryDistributionMethod String?           // DOWNLOAD | FTP — varsayılan: DOWNLOAD
+  ftpHost     String?
+  ftpPort     Int?
+  ftpUser     String?
+  ftpPassword String?               // stored encrypted
+
   // ── Deployment Environments ──
   environments     String[]                     @default([])
 
@@ -335,19 +350,20 @@ model CustomerProductMapping {
   lastSyncDate     DateTime?
   lastSyncRef      String?
 
-  // ── yeni FK: Customer → Product (productVersionId deprecated) ──
-  productId        String?                      // hedef: CPM Product'a bağlı, specific version currentVersionId ile
+  // ── yeni FK: Customer → Product ──
+  productId        String                       // müşterinin abone olduğu product
   currentVersionId String?                      // müşterinin şu an çalıştığı versiyon
 
   customer         Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  productVersion   ProductVersion  @relation(fields: [productVersionId], references: [id])
-  product          Product?        @relation("CpmProduct", fields: [productId], references: [id])
+  productVersion   ProductVersion? @relation(fields: [productVersionId], references: [id])
+  product          Product         @relation("CpmProduct", fields: [productId], references: [id])
   currentVersion   ProductVersion? @relation("CpmCurrentVersion", fields: [currentVersionId], references: [id])
 
-  @@unique([customerId, productVersionId])
+  @@unique([customerId, productId])
   @@map("customer_product_mappings")
 }
 
+// @deprecated: CPM subscription mekanizması aktif hale gelince bu model kaldırılacak
 model CustomerServiceMapping {
   id          String   @id @default(uuid())
   customerId  String
@@ -468,7 +484,11 @@ model ReleaseTodo {
   isTemplate       Boolean         @default(false)
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
-  timing           String          @default("PRE")
+  phase            String          @default("PRE") @map("timing")  // PRE | DURING | POST — maps to timing column
+  responsibleTeam  String?                           // FREE TEXT: team name or code
+  isRecurring      Boolean         @default(false)
+  customerScope    String?                           // ALL | SPECIFIC
+  guideUrl         String?
   productVersion   ProductVersion? @relation(fields: [productVersionId], references: [id])
   todoTemplate     TodoTemplate?   @relation(fields: [templateId], references: [id], onDelete: SetNull)
   todoCompletions  CustomerTodoCompletion[]
@@ -627,6 +647,8 @@ model TransitionIssue {
   description      String
   status           IssueStatus   @default(OPEN)
   priority         IssuePriority @default(MEDIUM)
+  reportMode       String        @default("MANUAL")  // MANUAL | AUTOMATIC
+  severity         String?                              // CRITICAL | HIGH | MEDIUM | LOW
   category         String?
   module           String?
   steps            String?
@@ -657,12 +679,13 @@ model TransitionIssue {
 }
 
 model IssueComment {
-  id        String   @id @default(uuid())
-  issueId   String
-  authorId  String?
+  id         String   @id @default(uuid())
+  issueId    String
+  authorId   String?
   authorName String
-  body      String
-  createdAt DateTime @default(now())
+  authorSide String   @default("ORG")  // ORG | CUSTOMER
+  body       String
+  createdAt  DateTime @default(now())
 
   issue TransitionIssue @relation(fields: [issueId], references: [id], onDelete: Cascade)
 
@@ -691,22 +714,25 @@ model IssueAttachment {
 enum OrgRole {
   ADMIN
   RELEASE_MANAGER
+  PRODUCT_OWNER
   DEVELOPER
-  QA
+  DEVOPS_ENGINEER
+  QA_ENGINEER
   VIEWER
 }
 
 enum CustomerRole {
-  CONTACT
-  VIEWER
-  ADMIN
+  CUSTOMER_ADMIN
+  APP_ADMIN
+  APPROVER
+  BUSINESS_USER
+  PARTNER
 }
 
 model UserProductAccess {
   id        String  @id @default(uuid())
   userId    String
   productId String
-  canWrite  Boolean @default(false)
 
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -716,16 +742,18 @@ model UserProductAccess {
 }
 
 model CustomerUser {
-  id           String       @id @default(uuid())
-  customerId   String
-  email        String
-  name         String
-  role         CustomerRole @default(VIEWER)
-  passwordHash String?
-  isActive     Boolean      @default(true)
-  lastLoginAt  DateTime?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  id               String       @id @default(uuid())
+  customerId       String
+  email            String
+  name             String
+  customerRole     CustomerRole @default(BUSINESS_USER) @map("role")
+  passwordHash     String?
+  isActive         Boolean      @default(true)
+  lastLoginAt      DateTime?
+  invitationToken  String?      @unique
+  invitationExpiry DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
@@ -737,28 +765,19 @@ model CustomerUser {
 // ── Faz 8: DORA + Dashboard Metrikleri ───────────────────────────────────────
 
 model MetricSnapshot {
-  id            String   @id @default(uuid())
-  period        String   // e.g. "2026-03", "2026-Q1"
-  periodType    String   // "MONTH" | "QUARTER" | "WEEK"
-  productId     String?
-  // DORA metrics
-  deployFreq    Float?   // deployments per day
-  leadTimeDays  Float?   // avg lead time in days
-  changeFailRate Float?  // 0.0 - 1.0
-  mttrHours     Float?   // mean time to recover in hours
-  // Release ops
-  releasesTotal Int?
-  bugsReported  Int?
-  bugsResolved  Int?
-  p0Count       Int?
-  // Awareness
-  customersOnLatest Int?
-  customersTotal    Int?
-  computedAt    DateTime @default(now())
+  id          String   @id @default(uuid())
+  period      String   // e.g. "2026-03", "2026-Q1"
+  periodType  String   // "MONTH" | "QUARTER" | "WEEK"
+  productId   String?
+  metricType  String   // e.g. "DEPLOY_FREQ" | "LEAD_TIME" | "CHANGE_FAIL_RATE" | "MTTR" | "RELEASES_TOTAL" etc.
+  value       Float
+  metadata    Json?
+  computedAt  DateTime @default(now())
 
   product Product? @relation(fields: [productId], references: [id])
 
   @@index([period, productId])
+  @@index([metricType])
   @@map("metric_snapshots")
 }
 
@@ -994,5 +1013,50 @@ model TwoFactorConfig {
   updatedAt   DateTime @updatedAt
 
   @@map("two_factor_configs")
+}
+
+// ── Faz 15: Section 8 — Customer–Servis Versiyon Matrisi ─────────────────────
+
+model CustomerServiceVersion {
+  id               String   @id @default(uuid())
+  customerId       String                    // FK → Customer
+  productId        String                    // FK → Product (denormalize — hızlı filtre)
+  serviceId        String                    // FK → Service
+  currentRelease   String                    // "Release-47" — şu an kullanılan release adı
+  currentVersionId String                    // FK → ProductVersion — hangi ürün versiyonuyla alındı
+  takenAt          DateTime                  // bu release'e ne zaman geçildi
+  previousRelease  String?                   // "Release-45" — bir önceki release
+  updatedAt        DateTime @updatedAt
+
+  customer       Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  product        Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  service        Service        @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  currentVersion ProductVersion @relation(fields: [currentVersionId], references: [id])
+
+  history CustomerServiceVersionHistory[]
+
+  @@unique([customerId, serviceId])
+  @@index([customerId])
+  @@index([serviceId])
+  @@index([productId])
+  @@map("customer_service_versions")
+}
+
+model CustomerServiceVersionHistory {
+  id              String   @id @default(uuid())
+  customerId      String
+  serviceId       String
+  fromRelease     String                    // "Release-45"
+  toRelease       String                    // "Release-47"
+  fromVersionId   String                    // ProductVersion v2.4.0
+  toVersionId     String                    // ProductVersion v2.5.0
+  transitionDate  DateTime                  // gerçekleşen tarih
+  createdAt       DateTime @default(now())
+
+  customerServiceVersion CustomerServiceVersion @relation(fields: [customerId, serviceId], references: [customerId, serviceId], onDelete: Cascade)
+
+  @@index([customerId, serviceId])
+  @@index([customerId, serviceId, transitionDate(sort: Desc)])
+  @@map("customer_service_version_histories")
 }
 

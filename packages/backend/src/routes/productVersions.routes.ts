@@ -1,15 +1,16 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../lib/prisma';
-import { authenticateJWT, requireRole } from '../middleware/auth.middleware';
+import { authenticateJWT, requireRole, filterByUserProducts } from '../middleware/auth.middleware';
 import { AppError } from '../middleware/errorHandler.middleware';
 
 const router = Router();
 router.use(authenticateJWT);
+router.use(filterByUserProducts);
 
 const versionSchema = z.object({
   productId: z.string().uuid(),
-  version: z.string().min(1),
+  version: z.string().min(1).regex(/^v?\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$/, 'Geçerli bir semver formatı girin (örn: 1.2.3 veya v1.2.3-rc1)'),
   phase: z.enum(['PLANNED', 'DEVELOPMENT', 'RC', 'STAGING', 'PRODUCTION', 'ARCHIVED']).optional(),
   isHotfix: z.boolean().optional(),
   masterStartDate: z.string().datetime().optional().nullable(),
@@ -27,6 +28,7 @@ router.get('/', async (req, res, next) => {
     const { productId, phase, upcoming } = req.query;
     const versions = await prisma.productVersion.findMany({
       where: {
+        ...(req.accessibleProductIds ? { productId: { in: req.accessibleProductIds } } : {}),
         ...(productId ? { productId: String(productId) } : {}),
         ...(phase ? { phase: String(phase) } : {}),
         ...(upcoming === 'true' ? { targetDate: { gte: new Date() } } : {}),
@@ -35,6 +37,57 @@ router.get('/', async (req, res, next) => {
       orderBy: [{ targetDate: 'asc' }, { createdAt: 'desc' }],
     });
     res.json({ data: versions });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/product-versions/customer-calendar?customerId={id}
+// C-06: Müşteri takvimi — CPM üzerinden ürünlerini bul, customerVisibleStatuses ile filtrele
+router.get('/customer-calendar', async (req, res, next) => {
+  try {
+    const customerId = req.query.customerId ? String(req.query.customerId) : null;
+    if (!customerId) throw new AppError(400, 'customerId zorunludur');
+
+    // Müşterinin abone olduğu ürünleri bul
+    const mappings = await prisma.customerProductMapping.findMany({
+      where: { customerId, isActive: true },
+      select: { productId: true },
+    });
+    const productIds = [...new Set(mappings.map((m) => m.productId))];
+
+    if (productIds.length === 0) {
+      return res.json({ data: [] });
+    }
+
+    // Her ürünün customerVisibleStatuses'ını çek
+    const products = await prisma.product.findMany({
+      where: { id: { in: productIds } },
+      select: { id: true, customerVisibleStatuses: true },
+    });
+
+    // productId → allowed phases map
+    const allowedPhasesMap = new Map<string, string[]>();
+    for (const p of products) {
+      allowedPhasesMap.set(p.id, p.customerVisibleStatuses.length > 0 ? p.customerVisibleStatuses : ['PRODUCTION']);
+    }
+
+    // Her ürün grubu için versiyonları çek (phase filtreli)
+    const versionResults = await Promise.all(
+      products.map((p) =>
+        prisma.productVersion.findMany({
+          where: { productId: p.id, phase: { in: allowedPhasesMap.get(p.id) ?? ['PRODUCTION'] } },
+          select: {
+            id: true, version: true, phase: true, targetDate: true, releaseDate: true,
+            isHotfix: true, description: true, notesPublished: true,
+            product: { select: { id: true, name: true } },
+          },
+          orderBy: { targetDate: 'asc' },
+        })
+      )
+    );
+
+    res.json({ data: versionResults.flat() });
   } catch (err) {
     next(err);
   }
@@ -62,14 +115,51 @@ router.get('/:id', async (req, res, next) => {
 router.post('/', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req, res, next) => {
   try {
     const data = versionSchema.parse(req.body);
+    const { masterStartDate, testDate, preProdDate, targetDate, ...rest } = data;
+
+    // C-05: concurrentUpdatePolicy kontrolü
+    const product = await prisma.product.findUnique({
+      where: { id: rest.productId },
+      select: { concurrentUpdatePolicy: true },
+    });
+    if (!product) throw new AppError(404, 'Ürün bulunamadı');
+
+    const concurrentCount = await prisma.productVersion.count({
+      where: {
+        productId: rest.productId,
+        phase: { in: ['DEVELOPMENT', 'RC', 'STAGING'] },
+      },
+    });
+
+    if (concurrentCount > 0 && product.concurrentUpdatePolicy) {
+      if (product.concurrentUpdatePolicy === 'BLOCK') {
+        throw new AppError(409, `Bu ürün için zaten aktif geliştirme aşamasında (DEVELOPMENT/RC/STAGING) ${concurrentCount} versiyon mevcut. concurrentUpdatePolicy=BLOCK: yeni versiyon oluşturulamaz.`);
+      }
+      // WARN: oluştururuz ama uyarıyla birlikte
+      const version = await prisma.productVersion.create({
+        data: {
+          ...rest,
+          phase: 'PLANNED',
+          devStartDate: masterStartDate ? new Date(masterStartDate) : null,
+          testStartDate: testDate ? new Date(testDate) : null,
+          preProdDate: preProdDate ? new Date(preProdDate) : null,
+          targetDate: targetDate ? new Date(targetDate) : null,
+        },
+      });
+      return res.status(201).json({
+        data: version,
+        warning: `Bu ürün için zaten ${concurrentCount} aktif versiyon var (DEVELOPMENT/RC/STAGING). concurrentUpdatePolicy=WARN.`,
+      });
+    }
+
     const version = await prisma.productVersion.create({
       data: {
-        ...data,
+        ...rest,
         phase: 'PLANNED',
-        masterStartDate: data.masterStartDate ? new Date(data.masterStartDate) : null,
-        testDate: data.testDate ? new Date(data.testDate) : null,
-        preProdDate: data.preProdDate ? new Date(data.preProdDate) : null,
-        targetDate: data.targetDate ? new Date(data.targetDate) : null,
+        devStartDate: masterStartDate ? new Date(masterStartDate) : null,
+        testStartDate: testDate ? new Date(testDate) : null,
+        preProdDate: preProdDate ? new Date(preProdDate) : null,
+        targetDate: targetDate ? new Date(targetDate) : null,
       },
     });
     res.status(201).json({ data: version });
@@ -82,14 +172,16 @@ router.post('/', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req, res, next)
 router.put('/:id', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req, res, next) => {
   try {
     const data = versionSchema.partial().parse(req.body);
+    const { productId, masterStartDate, testDate, preProdDate, targetDate, ...rest } = data;
     const version = await prisma.productVersion.update({
       where: { id: String(req.params.id) },
       data: {
-        ...data,
-        masterStartDate: data.masterStartDate !== undefined ? (data.masterStartDate ? new Date(data.masterStartDate) : null) : undefined,
-        testDate: data.testDate !== undefined ? (data.testDate ? new Date(data.testDate) : null) : undefined,
-        preProdDate: data.preProdDate !== undefined ? (data.preProdDate ? new Date(data.preProdDate) : null) : undefined,
-        targetDate: data.targetDate !== undefined ? (data.targetDate ? new Date(data.targetDate) : null) : undefined,
+        ...rest,
+        ...(productId !== undefined && { product: { connect: { id: productId } } }),
+        devStartDate: masterStartDate !== undefined ? (masterStartDate ? new Date(masterStartDate) : null) : undefined,
+        testStartDate: testDate !== undefined ? (testDate ? new Date(testDate) : null) : undefined,
+        preProdDate: preProdDate !== undefined ? (preProdDate ? new Date(preProdDate) : null) : undefined,
+        targetDate: targetDate !== undefined ? (targetDate ? new Date(targetDate) : null) : undefined,
       },
     });
     res.json({ data: version });
@@ -115,8 +207,8 @@ router.patch('/:id', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req, res, n
       where: { id: String(req.params.id) },
       data: {
         ...data,
-        masterStartDate: data.masterStartDate !== undefined ? (data.masterStartDate ? new Date(data.masterStartDate) : null) : undefined,
-        testDate: data.testDate !== undefined ? (data.testDate ? new Date(data.testDate) : null) : undefined,
+        devStartDate: data.masterStartDate !== undefined ? (data.masterStartDate ? new Date(data.masterStartDate) : null) : undefined,
+        testStartDate: data.testDate !== undefined ? (data.testDate ? new Date(data.testDate) : null) : undefined,
         preProdDate: data.preProdDate !== undefined ? (data.preProdDate ? new Date(data.preProdDate) : null) : undefined,
         targetDate: data.targetDate !== undefined ? (data.targetDate ? new Date(data.targetDate) : null) : undefined,
       },
@@ -126,17 +218,64 @@ router.patch('/:id', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req, res, n
 });
 
 // PATCH /api/product-versions/:id/release — release onayı: releaseDate set, phase=PRODUCTION
+// D3-02: versionPackages[] kabul et, VersionPackage kayıtları oluştur, notesPublished=true set et
+const releaseBodySchema = z.object({
+  versionPackages: z.array(z.object({
+    packageType: z.string().min(1),
+    name: z.string().min(1),
+    version: z.string().min(1),
+    description: z.string().optional(),
+    artifactUrl: z.string().optional(),
+    helmRepoUrl: z.string().optional(),
+    helmChartName: z.string().optional(),
+    imageRegistry: z.string().optional(),
+    imageName: z.string().optional(),
+    imageTag: z.string().optional(),
+    publishedBy: z.string().optional(),
+  })).optional(),
+  notesPublished: z.boolean().optional(),
+});
+
 router.patch('/:id/release', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req, res, next) => {
   try {
-    const version = await prisma.productVersion.findUnique({ where: { id: String(req.params.id) } });
+    const versionId = String(req.params.id);
+    const version = await prisma.productVersion.findUnique({ where: { id: versionId } });
     if (!version) throw new AppError(404, 'Versiyon bulunamadı');
     if (version.releaseDate) throw new AppError(400, 'Bu versiyon zaten yayınlanmış');
 
-    const updated = await prisma.productVersion.update({
-      where: { id: String(req.params.id) },
-      data: { phase: 'PRODUCTION', releaseDate: new Date() },
-    });
-    res.json({ data: updated });
+    const body = releaseBodySchema.parse(req.body);
+
+    // Atomik: versiyon güncelle + paket kayıtları oluştur
+    const [updated] = await prisma.$transaction([
+      prisma.productVersion.update({
+        where: { id: versionId },
+        data: {
+          phase: 'PRODUCTION',
+          releaseDate: new Date(),
+          notesPublished: body.notesPublished ?? true,
+        },
+      }),
+      ...(body.versionPackages ?? []).map(pkg =>
+        prisma.versionPackage.create({
+          data: {
+            productVersionId: versionId,
+            packageType: pkg.packageType,
+            name: pkg.name,
+            version: pkg.version,
+            description: pkg.description,
+            artifactUrl: pkg.artifactUrl,
+            helmRepoUrl: pkg.helmRepoUrl,
+            helmChartName: pkg.helmChartName,
+            imageRegistry: pkg.imageRegistry,
+            imageName: pkg.imageName,
+            imageTag: pkg.imageTag,
+            publishedBy: pkg.publishedBy ?? 'system',
+          },
+        })
+      ),
+    ]);
+
+    res.json({ data: updated, packagesCreated: (body.versionPackages ?? []).length });
   } catch (err) {
     next(err);
   }
@@ -155,10 +294,12 @@ router.patch('/:id/advance-phase', requireRole('ADMIN', 'RELEASE_MANAGER'), asyn
     }
 
     const nextPhase = PHASE_ORDER[currentIndex + 1];
-    const updateData: Record<string, unknown> = { phase: nextPhase };
+    // C-03: PRODUCTION geçişi yalnızca Health Check (release endpoint) üzerinden
     if (nextPhase === 'PRODUCTION') {
-      updateData.releaseDate = new Date();
+      throw new AppError(403, 'PRODUCTION geçişi advance-phase ile yapılamaz. Health Check sayfasından /:id/release endpoint\'ini kullanın.');
     }
+
+    const updateData: Record<string, unknown> = { phase: nextPhase };
 
     const updated = await prisma.productVersion.update({
       where: { id: String(req.params.id) },
@@ -182,11 +323,12 @@ router.patch('/:id/phase', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req, 
     if (nextIndex < currentIndex) {
       throw new AppError(400, `Geri geçiş yapılamaz: ${version.phase} → ${newPhase}`);
     }
+    // C-03: PRODUCTION geçişi yalnızca Health Check (release endpoint) üzerinden
+    if (newPhase === 'PRODUCTION') {
+      throw new AppError(403, 'PRODUCTION geçişi bu endpoint üzerinden yapılamaz. Health Check sayfasından /:id/release endpoint\'ini kullanın.');
+    }
 
     const updateData: Record<string, unknown> = { phase: newPhase };
-    if (newPhase === 'PRODUCTION' && !version.releaseDate) {
-      updateData.releaseDate = new Date();
-    }
     if (newPhase === 'ARCHIVED') {
       updateData.deprecatedAt = new Date();
     }
@@ -207,10 +349,24 @@ router.patch('/:id/deprecate', requireRole('ADMIN', 'RELEASE_MANAGER'), async (r
     const versionId = String(req.params.id);
     const force = req.query.force === 'true';
 
-    // Check for active customers on this version
-    const activeMappings = await prisma.customerProductMapping.findMany({
-      where: { productVersionId: versionId, isActive: true },
-      include: { customer: { select: { id: true, name: true } } },
+    // Check for active customers on this version (productVersionId OR currentVersionId)
+    const [mappingsByVersionId, mappingsByCurrentId] = await Promise.all([
+      prisma.customerProductMapping.findMany({
+        where: { productVersionId: versionId, isActive: true },
+        include: { customer: { select: { id: true, name: true } } },
+      }),
+      prisma.customerProductMapping.findMany({
+        where: { currentVersionId: versionId, isActive: true },
+        include: { customer: { select: { id: true, name: true } } },
+      }),
+    ]);
+
+    // Deduplicate by customer id
+    const seen = new Set<string>();
+    const activeMappings = [...mappingsByVersionId, ...mappingsByCurrentId].filter((m) => {
+      if (seen.has(m.customer.id)) return false;
+      seen.add(m.customer.id);
+      return true;
     });
 
     if (activeMappings.length > 0 && !force) {

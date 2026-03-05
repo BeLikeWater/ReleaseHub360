@@ -1,9 +1,10 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import {
   Box, Typography, Paper, Chip, Popover, Divider, CircularProgress,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Alert,
   Stack, TextField, MenuItem, FormControlLabel, Checkbox, Button,
   ToggleButton, ToggleButtonGroup, LinearProgress, Tooltip,
+  Dialog, DialogTitle, DialogContent, DialogActions,
 } from '@mui/material';
 import {
   OpenInNew as OpenInNewIcon,
@@ -11,10 +12,15 @@ import {
   Category as ProductIcon,
   Business as CustomerIcon,
   Download as DownloadIcon,
+  Upload as UploadIcon,
 } from '@mui/icons-material';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import apiClient from '@/api/client';
+import * as XLSX from 'xlsx';
+import {
+  fetchMatrix, MatrixCell,
+} from '@/api/serviceVersionMatrixService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -53,21 +59,182 @@ const STATUS_CONFIG: Record<string, { bg: string; label: string; emoji: string }
   current: { bg: '#e8f5e9', label: 'Güncel', emoji: '✅' },
   minor:   { bg: '#fff8e1', label: 'Minor Geride', emoji: '🟡' },
   major:   { bg: '#ffebee', label: 'Major Geride', emoji: '🔴' },
+  CURRENT:  { bg: '#e8f5e9', label: 'Güncel', emoji: '✅' },
+  WARNING:  { bg: '#fff8e1', label: 'Uyarı', emoji: '🟡' },
+  CRITICAL: { bg: '#ffebee', label: 'Kritik', emoji: '🔴' },
+  UNKNOWN:  { bg: '#f5f5f5', label: 'Bilinmiyor', emoji: '❓' },
 };
 
-function downloadCsv(filename: string, headers: string[], rows: string[][]) {
-  const bom = '\uFEFF';
-  const content = bom + [headers.join(';'), ...rows.map(r => r.join(';'))].join('\n');
-  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(link.href);
+function downloadXlsx(filename: string, headers: string[], rows: string[][]) {
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  // Auto-width for columns
+  ws['!cols'] = headers.map(() => ({ wch: 20 }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Rapor');
+  XLSX.writeFile(wb, filename);
+}
+
+function downloadPdf(filename: string, headers: string[], rows: string[][]) {
+  const tableHtml = `
+    <html>
+      <head><title>${filename}</title>
+        <style>
+          body { font-family: Arial, sans-serif; }
+          table { border-collapse: collapse; width: 100%; font-size: 11px; }
+          th, td { border: 1px solid #ccc; padding: 5px 8px; }
+          th { background: #f0f0f0; font-weight: bold; }
+          tr:nth-child(even) { background: #fafafa; }
+        </style>
+      </head>
+      <body>
+        <h3 style="margin-bottom:12px">${filename.replace('.pdf', '')}</h3>
+        <table>
+          <thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+          <tbody>
+            ${rows.map(row => `<tr>${row.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}
+          </tbody>
+        </table>
+        <script>window.onload = function() { window.print(); }<\/script>
+      </body>
+    </html>
+  `;
+  const blob = new Blob([tableHtml], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  window.open(url, '_blank');
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
 const ALL_PRODUCTS = '__ALL__';
 const ALL_CUSTOMERS = '__ALL__';
+
+// ─── Import Dialog ────────────────────────────────────────────────────────────
+
+type ImportRecord = { serviceId: string; productVersionId: string; prodVersion?: string; prepVersion?: string };
+
+function parseCsvToRecords(text: string): ImportRecord[] {
+  const lines = text.trim().split('\n');
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+  return lines.slice(1).map(line => {
+    const vals = line.split(',').map(v => v.trim().replace(/"/g, ''));
+    const rec: Record<string, string> = {};
+    headers.forEach((h, i) => { rec[h] = vals[i] ?? ''; });
+    return {
+      serviceId: rec['serviceId'] ?? rec['service_id'] ?? '',
+      productVersionId: rec['productVersionId'] ?? rec['product_version_id'] ?? '',
+      prodVersion: rec['prodVersion'] ?? rec['prod_version'] ?? undefined,
+      prepVersion: rec['prepVersion'] ?? rec['prep_version'] ?? undefined,
+    };
+  }).filter(r => r.serviceId && r.productVersionId);
+}
+
+function ImportDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [records, setRecords] = useState<ImportRecord[]>([]);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [importResult, setImportResult] = useState<{ created: number; updated: number; failed: number } | null>(null);
+
+  const importMutation = useMutation({
+    mutationFn: (recs: ImportRecord[]) =>
+      apiClient.post('/service-versions/bootstrap', { records: recs }).then(r => r.data),
+    onSuccess: (data) => {
+      setImportResult(data.data);
+      queryClient.invalidateQueries({ queryKey: ['service-versions'] });
+    },
+  });
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setParseError(null);
+    setImportResult(null);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const text = ev.target?.result as string;
+        if (file.name.endsWith('.json')) {
+          const parsed = JSON.parse(text);
+          const arr = Array.isArray(parsed) ? parsed : parsed.records ?? [];
+          setRecords(arr);
+        } else {
+          setRecords(parseCsvToRecords(text));
+        }
+      } catch {
+        setParseError('Dosya parse edilemedi. JSON veya CSV formatı bekleniyor.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleClose = () => {
+    setRecords([]);
+    setParseError(null);
+    setImportResult(null);
+    if (fileRef.current) fileRef.current.value = '';
+    onClose();
+  };
+
+  return (
+    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
+      <DialogTitle>Servis Versiyon İçe Aktarma</DialogTitle>
+      <DialogContent>
+        <Stack spacing={2} mt={1}>
+          <Alert severity="info" sx={{ fontSize: 12 }}>
+            CSV formatı: <code>serviceId,productVersionId,prodVersion,prepVersion</code>
+            <br />
+            JSON formatı: <code>{'[{serviceId, productVersionId, prodVersion?, prepVersion?}]'}</code>
+          </Alert>
+
+          <Button
+            variant="outlined"
+            component="label"
+            startIcon={<UploadIcon />}
+          >
+            Dosya Seç (.csv / .json)
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".csv,.json"
+              hidden
+              onChange={handleFile}
+            />
+          </Button>
+
+          {parseError && <Alert severity="error">{parseError}</Alert>}
+
+          {records.length > 0 && !importResult && (
+            <Alert severity="success">
+              <strong>{records.length}</strong> kayıt tespit edildi. İçe aktarmak için onaylayın.
+            </Alert>
+          )}
+
+          {importResult && (
+            <Alert severity="success">
+              ✅ İçe aktarma tamamlandı — Oluşturulan: <strong>{importResult.created}</strong>,
+              Güncellenen: <strong>{importResult.updated}</strong>,
+              Başarısız: <strong>{importResult.failed}</strong>
+            </Alert>
+          )}
+
+          {importMutation.isError && (
+            <Alert severity="error">İçe aktarma başarısız. Kayıtların geçerli olduğundan emin olun.</Alert>
+          )}
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={handleClose}>Kapat</Button>
+        <Button
+          variant="contained"
+          disabled={records.length === 0 || importMutation.isPending || !!importResult}
+          onClick={() => importMutation.mutate(records)}
+        >
+          {importMutation.isPending ? 'İçe Aktarılıyor...' : `${records.length} Kaydı Aktar`}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
@@ -79,10 +246,17 @@ export default function ServiceVersionMatrixPage() {
   const [customerFilter, setCustomerFilter] = useState<string>(ALL_CUSTOMERS);
   const [search, setSearch] = useState('');
   const [showOutdatedOnly, setShowOutdatedOnly] = useState(false);
+  const [importDlgOpen, setImportDlgOpen] = useState(false);
 
   const { data: mappings = [], isLoading: mLoading, error: mError } = useQuery<CustomerMapping[]>({
     queryKey: ['customer-product-mappings'],
     queryFn: () => apiClient.get('/customer-product-mappings').then(r => r.data.data ?? r.data),
+  });
+
+  // New service-level matrix data from CustomerServiceVersion API
+  const { data: matrixCells = [], isLoading: matrixLoading } = useQuery<MatrixCell[]>({
+    queryKey: ['service-version-matrix', productFilter === ALL_PRODUCTS ? undefined : productFilter],
+    queryFn: () => fetchMatrix(productFilter !== ALL_PRODUCTS ? { productId: productFilter } : undefined),
   });
 
   const { data: products = [] } = useQuery<Product[]>({
@@ -130,6 +304,73 @@ export default function ServiceVersionMatrixPage() {
     }
     return m;
   }, [mappings]);
+
+  // ─── Service-Level Matrix (new CustomerServiceVersion API) ─────────────────
+  const allServices = useMemo(() => {
+    const m = new Map<string, { id: string; name: string; productId: string; productName: string }>();
+    for (const c of matrixCells) {
+      if (!m.has(c.serviceId)) {
+        m.set(c.serviceId, { id: c.serviceId, name: c.serviceName, productId: c.productId, productName: c.productName });
+      }
+    }
+    return [...m.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [matrixCells]);
+
+  const serviceMatrixMap = useMemo(() => {
+    const m = new Map<string, Map<string, MatrixCell>>();
+    for (const c of matrixCells) {
+      if (!m.has(c.customerId)) m.set(c.customerId, new Map());
+      m.get(c.customerId)!.set(c.serviceId, c);
+    }
+    return m;
+  }, [matrixCells]);
+
+  const serviceCustomers = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of matrixCells) m.set(c.customerId, c.customerName);
+    return [...m.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [matrixCells]);
+
+  const serviceRows = useMemo(() => {
+    let entries = serviceCustomers;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      entries = entries.filter(c => c.name.toLowerCase().includes(q));
+    }
+    if (customerFilter !== ALL_CUSTOMERS) {
+      entries = entries.filter(c => c.id === customerFilter);
+    }
+    if (showOutdatedOnly) {
+      entries = entries.filter(c => {
+        const svcMap = serviceMatrixMap.get(c.id);
+        if (!svcMap) return false;
+        return allServices.some(s => {
+          const cell = svcMap.get(s.id);
+          return cell && (cell.status === 'WARNING' || cell.status === 'CRITICAL');
+        });
+      });
+    }
+    return entries;
+  }, [serviceCustomers, search, customerFilter, showOutdatedOnly, serviceMatrixMap, allServices]);
+
+  const serviceStats = useMemo(() => {
+    let total = 0, outdated = 0, critical = 0;
+    for (const c of serviceCustomers) {
+      const svcMap = serviceMatrixMap.get(c.id);
+      if (!svcMap) continue;
+      for (const s of allServices) {
+        const cell = svcMap.get(s.id);
+        if (!cell) continue;
+        total++;
+        if (cell.status === 'WARNING') outdated++;
+        if (cell.status === 'CRITICAL') { outdated++; critical++; }
+      }
+    }
+    return { total, outdated, critical, customers: serviceCustomers.length };
+  }, [serviceCustomers, serviceMatrixMap, allServices]);
+
+  // Use service-level data for matrix view when available, fall back to product-level
+  const useServiceMatrix = viewMode === 'matrix' && matrixCells.length > 0;
 
   // Filtered rows (matrix/customer views)
   const rows = useMemo(() => {
@@ -218,28 +459,53 @@ export default function ServiceVersionMatrixPage() {
     return [...dist.entries()].sort((a, b) => b[0].localeCompare(a[0]));
   }, [productFocusedData]);
 
-  // Export handler
-  const handleExport = useCallback(() => {
+  // Export handler (XLSX)
+  const handleExportXlsx = useCallback(() => {
     if (viewMode === 'matrix') {
       const headers = ['Müşteri', ...cols.map(p => p.name)];
-      const csvRows = rows.map(([, c]) =>
+      const xlsxRows = rows.map(([, c]) =>
         [c.name, ...cols.map(p => c.products[p.id]?.productVersion.version ?? '—')]
       );
-      downloadCsv('versiyon-matrisi.csv', headers, csvRows);
+      downloadXlsx('versiyon-matrisi.xlsx', headers, xlsxRows);
     } else if (viewMode === 'product') {
       const headers = ['Müşteri', 'Versiyon', 'Durum', 'En Güncel', 'Eski (gün)'];
-      const csvRows = productFocusedData.map(m => [
+      const xlsxRows = productFocusedData.map(m => [
         m.customer.name, m.productVersion.version,
         STATUS_CONFIG[m.status].label, m.latest, String(m.stale),
       ]);
-      downloadCsv('urun-odakli-rapor.csv', headers, csvRows);
+      downloadXlsx('urun-odakli-rapor.xlsx', headers, xlsxRows);
     } else {
       const headers = ['Ürün', 'Versiyon', 'Durum', 'En Güncel', 'Eski (gün)'];
-      const csvRows = customerFocusedData.map(m => [
+      const xlsxRows = customerFocusedData.map(m => [
         m.productVersion.product.name, m.productVersion.version,
         STATUS_CONFIG[m.status].label, m.latest, String(m.stale),
       ]);
-      downloadCsv('musteri-odakli-rapor.csv', headers, csvRows);
+      downloadXlsx('musteri-odakli-rapor.xlsx', headers, xlsxRows);
+    }
+  }, [viewMode, cols, rows, productFocusedData, customerFocusedData]);
+
+  // Export handler (PDF)
+  const handleExportPdf = useCallback(() => {
+    if (viewMode === 'matrix') {
+      const headers = ['Müşteri', ...cols.map(p => p.name)];
+      const pdfRows = rows.map(([, c]) =>
+        [c.name, ...cols.map(p => c.products[p.id]?.productVersion.version ?? '—')]
+      );
+      downloadPdf('versiyon-matrisi.pdf', headers, pdfRows);
+    } else if (viewMode === 'product') {
+      const headers = ['Müşteri', 'Versiyon', 'Durum', 'En Güncel', 'Eski (gün)'];
+      const pdfRows = productFocusedData.map(m => [
+        m.customer.name, m.productVersion.version,
+        STATUS_CONFIG[m.status].label, m.latest, String(m.stale),
+      ]);
+      downloadPdf('urun-odakli-rapor.pdf', headers, pdfRows);
+    } else {
+      const headers = ['Ürün', 'Versiyon', 'Durum', 'En Güncel', 'Eski (gün)'];
+      const pdfRows = customerFocusedData.map(m => [
+        m.productVersion.product.name, m.productVersion.version,
+        STATUS_CONFIG[m.status].label, m.latest, String(m.stale),
+      ]);
+      downloadPdf('musteri-odakli-rapor.pdf', headers, pdfRows);
     }
   }, [viewMode, cols, rows, productFocusedData, customerFocusedData]);
 
@@ -259,8 +525,14 @@ export default function ServiceVersionMatrixPage() {
             <ToggleButton value="product"><Tooltip title="Ürün Odaklı"><ProductIcon fontSize="small" /></Tooltip></ToggleButton>
             <ToggleButton value="customer"><Tooltip title="Müşteri Odaklı"><CustomerIcon fontSize="small" /></Tooltip></ToggleButton>
           </ToggleButtonGroup>
-          <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={handleExport}>
-            CSV İndir
+          <Button size="small" variant="outlined" startIcon={<DownloadIcon />} onClick={handleExportXlsx}>
+            Excel İndir
+          </Button>
+          <Button size="small" variant="outlined" color="secondary" startIcon={<DownloadIcon />} onClick={handleExportPdf}>
+            PDF İndir
+          </Button>
+          <Button size="small" variant="contained" color="info" startIcon={<UploadIcon />} onClick={() => setImportDlgOpen(true)}>
+            İçe Aktar
           </Button>
         </Stack>
       </Stack>
@@ -302,18 +574,26 @@ export default function ServiceVersionMatrixPage() {
       </Stack>
 
       {/* Summary bar */}
-      <Paper variant="outlined" sx={{ px: 2, py: 1, mb: 2, display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-        <Typography variant="body2"><strong>{stats.customers}</strong> müşteri</Typography>
-        <Typography variant="body2"><strong>{stats.total}</strong> eşleştirme</Typography>
-        <Typography variant="body2" color={stats.outdated > 0 ? 'warning.main' : 'success.main'}>
-          <strong>{stats.outdated}</strong> güncelleme gerekiyor
-        </Typography>
-        {stats.critical > 0 && (
-          <Typography variant="body2" color="error.main">
-            <strong>{stats.critical}</strong> major fark
-          </Typography>
-        )}
-      </Paper>
+      {(() => {
+        const s = useServiceMatrix ? serviceStats : stats;
+        return (
+          <Paper variant="outlined" sx={{ px: 2, py: 1, mb: 2, display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+            <Typography variant="body2"><strong>{s.customers}</strong> müşteri</Typography>
+            <Typography variant="body2"><strong>{s.total}</strong> {useServiceMatrix ? 'servis eşleşmesi' : 'eşleştirme'}</Typography>
+            <Typography variant="body2" color={s.outdated > 0 ? 'warning.main' : 'success.main'}>
+              <strong>{s.outdated}</strong> güncelleme gerekiyor
+            </Typography>
+            {s.critical > 0 && (
+              <Typography variant="body2" color="error.main">
+                <strong>{s.critical}</strong> kritik fark
+              </Typography>
+            )}
+            {useServiceMatrix && (
+              <Chip label="Servis Düzeyi Matris" size="small" color="info" variant="outlined" />
+            )}
+          </Paper>
+        );
+      })()}
 
       {/* Legend */}
       <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap' }}>
@@ -326,66 +606,131 @@ export default function ServiceVersionMatrixPage() {
       </Box>
 
       {mError && <Alert severity="warning" sx={{ mb: 2 }}>Veriler yüklenemedi.</Alert>}
-      {mLoading && <Box sx={{ textAlign: 'center', py: 6 }}><CircularProgress /></Box>}
+      {(mLoading || matrixLoading) && <Box sx={{ textAlign: 'center', py: 6 }}><CircularProgress /></Box>}
 
       {/* ─── View: Matrix ─────────────────────────────────────────── */}
-      {!mLoading && viewMode === 'matrix' && (
+      {!mLoading && !matrixLoading && viewMode === 'matrix' && (
         <>
-          {rows.length === 0 && !mError ? (
-            <Paper variant="outlined" sx={{ p: 4, textAlign: 'center' }}>
-              <Typography color="text.secondary">Filtrelerle eşleşen müşteri bulunamadı.</Typography>
-            </Paper>
-          ) : (
-            <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: '70vh' }}>
-              <Table stickyHeader size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell sx={{ fontWeight: 700, minWidth: 180, position: 'sticky', left: 0, zIndex: 3, bgcolor: 'background.paper' }}>
-                      Müşteri
-                    </TableCell>
-                    {cols.map(p => (
-                      <TableCell key={p.id} sx={{ fontWeight: 700, minWidth: 130 }}>
-                        <Box>
-                          {p.name}
-                          <Typography variant="caption" display="block" color="text.secondary">
-                            güncel: {productLatest.get(p.id) ?? '—'}
-                          </Typography>
-                        </Box>
+          {/* Service-Level Matrix (new CustomerServiceVersion API) */}
+          {useServiceMatrix ? (
+            serviceRows.length === 0 ? (
+              <Paper variant="outlined" sx={{ p: 4, textAlign: 'center' }}>
+                <Typography color="text.secondary">Servis versiyon verisi bulunamadı. Bootstrap yapın veya geçiş tamamlayın.</Typography>
+              </Paper>
+            ) : (
+              <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: '70vh' }}>
+                <Table stickyHeader size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 700, minWidth: 180, position: 'sticky', left: 0, zIndex: 3, bgcolor: 'background.paper' }}>
+                        Müşteri
                       </TableCell>
-                    ))}
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {rows.map(([cId, cData]) => (
-                    <TableRow key={cId} hover>
-                      <TableCell sx={{ fontWeight: 600, position: 'sticky', left: 0, zIndex: 1, bgcolor: 'background.paper' }}>
-                        {cData.name}
-                      </TableCell>
-                      {cols.map(p => {
-                        const m = cData.products[p.id];
-                        if (!m) return <TableCell key={p.id}><Typography variant="caption" color="text.disabled">—</Typography></TableCell>;
-                        const latest = productLatest.get(p.id) ?? m.productVersion.version;
-                        const status = versionStatus(m.productVersion.version, latest);
-                        const days = staleDays(m.updatedAt);
-                        return (
-                          <TableCell key={p.id} sx={{ bgcolor: STATUS_CONFIG[status].bg, cursor: 'pointer' }}
-                            onClick={(e) => setPopover({ anchor: e.currentTarget as HTMLElement, mapping: m })}>
-                            <Chip label={m.productVersion.version} size="small"
-                              color={status === 'current' ? 'success' : status === 'minor' ? 'warning' : 'error'}
-                              variant={status === 'current' ? 'filled' : 'outlined'} />
-                            {status !== 'current' && days > 0 && (
-                              <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.25 }}>
-                                {days} gün
-                              </Typography>
-                            )}
-                          </TableCell>
-                        );
-                      })}
+                      {allServices.map(s => (
+                        <TableCell key={s.id} sx={{ fontWeight: 700, minWidth: 130 }}>
+                          <Box>
+                            {s.name}
+                            <Typography variant="caption" display="block" color="text.secondary">
+                              {s.productName}
+                            </Typography>
+                          </Box>
+                        </TableCell>
+                      ))}
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
+                  </TableHead>
+                  <TableBody>
+                    {serviceRows.map(c => (
+                      <TableRow key={c.id} hover>
+                        <TableCell sx={{ fontWeight: 600, position: 'sticky', left: 0, zIndex: 1, bgcolor: 'background.paper' }}>
+                          {c.name}
+                        </TableCell>
+                        {allServices.map(s => {
+                          const cell = serviceMatrixMap.get(c.id)?.get(s.id);
+                          if (!cell) return <TableCell key={s.id}><Typography variant="caption" color="text.disabled">—</Typography></TableCell>;
+                          const statusKey = cell.status as string;
+                          const cfg = STATUS_CONFIG[statusKey] ?? STATUS_CONFIG.UNKNOWN;
+                          return (
+                            <TableCell key={s.id} sx={{ bgcolor: cfg.bg }}>
+                              <Chip
+                                label={cell.currentRelease ?? '—'} size="small"
+                                color={cell.status === 'CURRENT' ? 'success' : cell.status === 'WARNING' ? 'warning' : cell.status === 'CRITICAL' ? 'error' : 'default'}
+                                variant={cell.status === 'CURRENT' ? 'filled' : 'outlined'}
+                              />
+                              {cell.staleCount > 0 && (
+                                <Tooltip title={`En güncel: ${cell.latestRelease ?? '—'}`}>
+                                  <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.25 }}>
+                                    {cell.staleCount} versiyon geride
+                                  </Typography>
+                                </Tooltip>
+                              )}
+                            </TableCell>
+                          );
+                        })}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )
+          ) : (
+            /* Fallback: Product-Level Matrix (old CustomerProductMapping API) */
+            <>
+              {rows.length === 0 && !mError ? (
+                <Paper variant="outlined" sx={{ p: 4, textAlign: 'center' }}>
+                  <Typography color="text.secondary">Filtrelerle eşleşen müşteri bulunamadı.</Typography>
+                </Paper>
+              ) : (
+                <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: '70vh' }}>
+                  <Table stickyHeader size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: 700, minWidth: 180, position: 'sticky', left: 0, zIndex: 3, bgcolor: 'background.paper' }}>
+                          Müşteri
+                        </TableCell>
+                        {cols.map(p => (
+                          <TableCell key={p.id} sx={{ fontWeight: 700, minWidth: 130 }}>
+                            <Box>
+                              {p.name}
+                              <Typography variant="caption" display="block" color="text.secondary">
+                                güncel: {productLatest.get(p.id) ?? '—'}
+                              </Typography>
+                            </Box>
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {rows.map(([cId, cData]) => (
+                        <TableRow key={cId} hover>
+                          <TableCell sx={{ fontWeight: 600, position: 'sticky', left: 0, zIndex: 1, bgcolor: 'background.paper' }}>
+                            {cData.name}
+                          </TableCell>
+                          {cols.map(p => {
+                            const m = cData.products[p.id];
+                            if (!m) return <TableCell key={p.id}><Typography variant="caption" color="text.disabled">—</Typography></TableCell>;
+                            const latest = productLatest.get(p.id) ?? m.productVersion.version;
+                            const status = versionStatus(m.productVersion.version, latest);
+                            const days = staleDays(m.updatedAt);
+                            return (
+                              <TableCell key={p.id} sx={{ bgcolor: STATUS_CONFIG[status].bg, cursor: 'pointer' }}
+                                onClick={(e) => setPopover({ anchor: e.currentTarget as HTMLElement, mapping: m })}>
+                                <Chip label={m.productVersion.version} size="small"
+                                  color={status === 'current' ? 'success' : status === 'minor' ? 'warning' : 'error'}
+                                  variant={status === 'current' ? 'filled' : 'outlined'} />
+                                {status !== 'current' && days > 0 && (
+                                  <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.25 }}>
+                                    {days} gün
+                                  </Typography>
+                                )}
+                              </TableCell>
+                            );
+                          })}
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )}
+            </>
           )}
         </>
       )}
@@ -594,6 +939,8 @@ export default function ServiceVersionMatrixPage() {
           );
         })()}
       </Popover>
+
+      <ImportDialog open={importDlgOpen} onClose={() => setImportDlgOpen(false)} />
     </Box>
   );
 }

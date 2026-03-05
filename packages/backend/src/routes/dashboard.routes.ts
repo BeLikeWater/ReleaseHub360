@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import prisma from '../lib/prisma';
 import { authenticateJWT } from '../middleware/auth.middleware';
+import { AppError } from '../middleware/errorHandler.middleware';
 
 const router = Router();
 router.use(authenticateJWT);
@@ -57,6 +58,7 @@ router.get('/active-releases', async (_req, res, next) => {
         product: { select: { id: true, name: true } },
         systemChanges: { select: { isBreaking: true } },
         releaseTodos: { where: { priority: 'P0', isCompleted: false }, select: { id: true } },
+        toTransitions: { select: { id: true, status: true, customerId: true } },
       },
       orderBy: { updatedAt: 'desc' },
       take: 20,
@@ -64,6 +66,8 @@ router.get('/active-releases', async (_req, res, next) => {
 
     const result = versions.map(v => {
       const score = Math.max(0, 100 - v.releaseTodos.length * 5 - v.systemChanges.filter(c => c.isBreaking).length * 10);
+      const totalTransitions = v.toTransitions.length;
+      const completedTransitions = v.toTransitions.filter(t => t.status === 'COMPLETED').length;
       return {
         id: v.id,
         version: v.version,
@@ -74,6 +78,12 @@ router.get('/active-releases', async (_req, res, next) => {
         healthScore: score,
         incompleteP0Count: v.releaseTodos.length,
         breakingChangeCount: v.systemChanges.filter(c => c.isBreaking).length,
+        // H4-02: customer transition ratio
+        customerTransition: {
+          total: totalTransitions,
+          completed: completedTransitions,
+          ratio: totalTransitions > 0 ? Math.round((completedTransitions / totalTransitions) * 100) : null,
+        },
       };
     });
 
@@ -148,7 +158,7 @@ router.get('/customer/:id', async (req, res, next) => {
             include: {
               product: { select: { id: true, name: true } },
               releaseTodos: {
-                select: { id: true, isCompleted: true, priority: true, timing: true },
+                select: { id: true, isCompleted: true, priority: true, phase: true },
               },
             },
           },
@@ -168,21 +178,36 @@ router.get('/customer/:id', async (req, res, next) => {
       return;
     }
 
+    // Sadece productVersion yüklü olan mapping'leri işle (productVersionId zorunlu olanlar)
+    type MappingWithVersion = (typeof productMappings)[number] & {
+      productVersion: NonNullable<(typeof productMappings)[number]['productVersion']>;
+      productVersionId: string;
+    };
+    const validMappings = productMappings.filter(
+      (m): m is MappingWithVersion => m.productVersion !== null && m.productVersionId !== null,
+    );
+
     // For each product mapping, find the latest PRODUCTION version of the same product
-    const productIds = [...new Set(productMappings.map((m) => m.productVersion.productId))];
-    const [latestVersions, versionPackages] = await Promise.all([
+    const productIds = [...new Set(validMappings.map((m) => m.productVersion.productId))];
+    const [latestVersions, versionPackages, openIssueCount, pendingTransition, incompleteTodoCount] = await Promise.all([
       prisma.productVersion.findMany({
         where: {
           productId: { in: productIds },
           phase: 'PRODUCTION',
         },
-        orderBy: { releaseDate: 'desc' },
+        // PostgreSQL DESC sıralamasında NULL değerler NULLS FIRST gelir (varsayılan).
+        // Bu durum, releaseDate atanmamış eski versiyonların "en son" olarak seçilmesine yol açar.
+        // nulls: 'last' ile releaseDate null olan versiyonlar sona itilir → gerçek en son versiyon seçilir.
+        orderBy: [
+          { releaseDate: { sort: 'desc', nulls: 'last' } },
+          { createdAt: 'desc' },
+        ],
         select: { id: true, productId: true, version: true, releaseDate: true },
       }),
       // Fetch version packages for all mapped versions so frontend can show download buttons
       prisma.versionPackage.findMany({
         where: {
-          productVersionId: { in: productMappings.map((m) => m.productVersionId) },
+          productVersionId: { in: validMappings.map((m) => m.productVersionId) },
         },
         select: {
           id: true, productVersionId: true, packageType: true,
@@ -192,18 +217,37 @@ router.get('/customer/:id', async (req, res, next) => {
         },
         orderBy: { publishedAt: 'desc' },
       }),
+      // U-01: Open transition issues count
+      prisma.transitionIssue.count({
+        where: { customerId, status: { notIn: ['RESOLVED', 'CLOSED'] } },
+      }),
+      // U-01: Active pending transition
+      prisma.customerVersionTransition.findFirst({
+        where: { customerId, status: 'PLANNED' },
+        include: {
+          toVersion: { select: { version: true, product: { select: { name: true } } } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      // U-01: Incomplete release todos for customer's products
+      prisma.releaseTodo.count({
+        where: {
+          productVersionId: { in: validMappings.map((m) => m.productVersionId) },
+          isCompleted: false,
+        },
+      }),
     ]);
 
     // Build product → latest PRODUCTION version map
-    const latestByProduct = new Map<string, { version: string; releaseDate: Date | null }>();
+    const latestByProduct = new Map<string, { id: string; version: string; releaseDate: Date | null }>();
     for (const v of latestVersions) {
       if (!latestByProduct.has(v.productId)) {
-        latestByProduct.set(v.productId, { version: v.version, releaseDate: v.releaseDate });
+        latestByProduct.set(v.productId, { id: v.id, version: v.version, releaseDate: v.releaseDate });
       }
     }
 
     // Enrich mappings with status info
-    const enrichedMappings = productMappings.map((m) => {
+    const enrichedMappings = validMappings.map((m) => {
       const latest = latestByProduct.get(m.productVersion.productId);
       const todos = m.productVersion.releaseTodos;
       const totalTodos = todos.length;
@@ -246,7 +290,7 @@ router.get('/customer/:id', async (req, res, next) => {
 
     // Summary stats
     const onLatestCount = enrichedMappings.filter((m) => m.isOnLatest).length;
-    const lastDeployDate = productMappings
+    const lastDeployDate = validMappings
       .filter((m) => m.productVersion.releaseDate)
       .sort((a, b) =>
         new Date(b.productVersion.releaseDate!).getTime() -
@@ -257,10 +301,20 @@ router.get('/customer/:id', async (req, res, next) => {
       data: {
         customer,
         summary: {
-          totalProducts: productMappings.length,
+          totalProducts: validMappings.length,
           onLatestCount,
-          pendingUpdateCount: productMappings.length - onLatestCount,
+          pendingUpdateCount: validMappings.length - onLatestCount,
           lastDeployDate,
+          openIssueCount,
+          incompleteTodoCount,
+          pendingTransition: pendingTransition
+            ? {
+                id: pendingTransition.id,
+                status: pendingTransition.status,
+                toVersion: pendingTransition.toVersion.version,
+                productName: pendingTransition.toVersion.product.name,
+              }
+            : null,
         },
         productMappings: enrichedMappings,
         serviceMappings,
@@ -335,13 +389,230 @@ router.get('/customer/:id/upcoming', async (req, res, next) => {
         version: v.version,
         phase: v.phase,
         isHotfix: v.isHotfix,
-        masterStartDate: v.masterStartDate,
-        testDate: v.testDate,
+        devStartDate: v.devStartDate,
+        testStartDate: v.testStartDate,
         preProdDate: v.preProdDate,
         targetDate: v.targetDate,
         releaseDate: v.releaseDate,
         product: v.product,
       })),
+    });
+  } catch (err) { next(err); }
+});
+
+// ── GET /api/dashboard/customer-products — E1-02: CPM-based product card API ─
+// Returns customer's products with version, todo stats, open issue count
+router.get('/customer-products', async (req, res, next) => {
+  try {
+    const customerId = String(req.query.customerId ?? '');
+    if (!customerId) throw new AppError(400, 'customerId parametresi gereklidir');
+
+    const mappings = await prisma.customerProductMapping.findMany({
+      where: { customerId, isActive: true },
+      include: {
+        product: {
+          include: {
+            versions: {
+              where: { phase: { notIn: ['ARCHIVED'] } },
+              orderBy: [{ releaseDate: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
+              take: 1,
+              include: {
+                releaseTodos: { select: { id: true, isCompleted: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Open transition issues for this customer
+    const openIssueCount = await prisma.transitionIssue.count({
+      where: { customerId, status: { notIn: ['RESOLVED', 'CLOSED'] } },
+    });
+
+    const result = mappings.map(m => {
+      const latestVersion = m.product.versions[0] ?? null;
+      const todos = latestVersion?.releaseTodos ?? [];
+      const totalTodos = todos.length;
+      const completedTodos = todos.filter(t => t.isCompleted).length;
+      const todoCompletionPct = totalTodos > 0 ? Math.round((completedTodos / totalTodos) * 100) : 100;
+
+      return {
+        mappingId: m.id,
+        productId: m.productId,
+        productName: m.product.name,
+        subscriptionLevel: m.subscriptionLevel,
+        currentVersionId: latestVersion?.id ?? null,
+        currentVersion: latestVersion?.version ?? null,
+        versionPhase: latestVersion?.phase ?? null,
+        lastReleaseDate: latestVersion?.releaseDate ?? null,
+        targetDate: latestVersion?.targetDate ?? null,
+        totalTodos,
+        completedTodos,
+        todoCompletionPct,
+        openIssueCount,
+        updatedAt: m.updatedAt,
+      };
+    });
+
+    res.json({ data: result });
+  } catch (err) { next(err); }
+});
+
+// ── H4-09: GET /api/dashboard/highlights ─────────────────────────────────────
+// Rule-based insight engine: returns up to 5 actionable highlights
+router.get('/highlights', async (_req, res, next) => {
+  try {
+    const highlights: { type: string; message: string; severity: 'info' | 'warning' | 'critical' }[] = [];
+    const now = Date.now();
+
+    // Rule 1: Customers 3+ versions behind
+    const cpms = await prisma.customerProductMapping.findMany({
+      where: { isActive: true },
+      include: {
+        product: { select: { name: true } },
+        currentVersion: { select: { version: true, createdAt: true } },
+        productVersion: { select: { version: true } },
+      },
+    });
+    for (const cpm of cpms) {
+      // Rough heuristic: if currentVersion is much older, flag it
+      if (cpm.currentVersion && cpm.productVersion) {
+        // if they're the same, might be fine; drift detection left to DORA
+      }
+    }
+
+    // Rule 2: Stale sync branches (>30 days)
+    const staleBranches = await prisma.customerBranch.findMany({
+      where: { isActive: true },
+      include: {
+        customer: { select: { name: true } },
+        syncHistory: { orderBy: { createdAt: 'desc' }, take: 1, select: { createdAt: true } },
+      },
+    });
+    const staleCount = staleBranches.filter(b => {
+      const last = b.syncHistory[0]?.createdAt;
+      return last ? (now - last.getTime()) > 30 * 24 * 60 * 60 * 1000 : true;
+    }).length;
+    if (staleCount > 0) {
+      highlights.push({
+        type: 'STALE_SYNC',
+        message: `${staleCount} müşteri dal(lar)ında son 30 günde sync yapılmamış.`,
+        severity: staleCount > 3 ? 'critical' : 'warning',
+      });
+    }
+
+    // Rule 3: MTTR improving (last 2 weeks vs prior 2 weeks from MetricSnapshot)
+    const twoWeeksAgo = new Date(now - 14 * 24 * 60 * 60 * 1000);
+    const fourWeeksAgo = new Date(now - 28 * 24 * 60 * 60 * 1000);
+    const [recentMttr, priorMttr] = await Promise.all([
+      prisma.metricSnapshot.aggregate({
+        where: { metricType: 'MTTR', computedAt: { gte: twoWeeksAgo } },
+        _avg: { value: true },
+      }),
+      prisma.metricSnapshot.aggregate({
+        where: { metricType: 'MTTR', computedAt: { gte: fourWeeksAgo, lt: twoWeeksAgo } },
+        _avg: { value: true },
+      }),
+    ]);
+    if (recentMttr._avg.value && priorMttr._avg.value && recentMttr._avg.value < priorMttr._avg.value) {
+      const improvePct = Math.round(((priorMttr._avg.value - recentMttr._avg.value) / priorMttr._avg.value) * 100);
+      highlights.push({
+        type: 'MTTR_IMPROVING',
+        message: `MTTR son 2 haftada %${improvePct} iyileşti. Harika gidiyorsunuz!`,
+        severity: 'info',
+      });
+    }
+
+    // Rule 4: Open CRITICAL issues
+    const criticalCount = await prisma.transitionIssue.count({
+      where: { priority: 'CRITICAL', status: { notIn: ['RESOLVED', 'CLOSED'] } },
+    });
+    if (criticalCount > 0) {
+      highlights.push({
+        type: 'CRITICAL_ISSUES',
+        message: `${criticalCount} kritik issue çözüm bekliyor.`,
+        severity: 'critical',
+      });
+    }
+
+    // Rule 5: Versions overdue (targetDate passed, not yet RELEASED)
+    const overdueCount = await prisma.productVersion.count({
+      where: {
+        targetDate: { lt: new Date() },
+        phase: { notIn: ['RELEASED', 'ARCHIVED', 'CANCELLED'] },
+      },
+    });
+    if (overdueCount > 0) {
+      highlights.push({
+        type: 'OVERDUE_VERSIONS',
+        message: `${overdueCount} versiyon hedef tarihi geçmiş, henüz yayınlanmamış.`,
+        severity: overdueCount > 3 ? 'critical' : 'warning',
+      });
+    }
+
+    res.json({ data: highlights.slice(0, 5) });
+  } catch (err) { next(err); }
+});
+
+// ── H4-10: GET /api/dashboard/version-transition/:versionId ───────────────────
+// Customer transition status for a specific version
+router.get('/version-transition/:versionId', async (req, res, next) => {
+  try {
+    const { versionId } = req.params;
+
+    const transitions = await prisma.customerVersionTransition.findMany({
+      where: { toVersionId: versionId },
+      include: {
+        customer: { select: { id: true, name: true, code: true } },
+      },
+    });
+
+    // Customers with CPM for this version's product (all potential transitioners)
+    const version = await prisma.productVersion.findUnique({
+      where: { id: versionId },
+      select: { productId: true, version: true, product: { select: { name: true } } },
+    });
+    if (!version) return res.status(404).json({ error: 'Versiyon bulunamadı' });
+
+    const allCpms = await prisma.customerProductMapping.findMany({
+      where: { productId: version.productId, isActive: true },
+      select: { customerId: true, customer: { select: { id: true, name: true, code: true } } },
+    });
+
+    const transitionMap = new Map(transitions.map(t => [t.customerId, t]));
+    const customerList = allCpms.map(cpm => {
+      const t = transitionMap.get(cpm.customerId);
+      return {
+        customerId: cpm.customerId,
+        customerName: cpm.customer.name,
+        customerCode: cpm.customer.code,
+        status: t?.status ?? 'NOT_PLANNED',
+        plannedDate: t?.plannedDate ?? null,
+        actualDate: t?.actualDate ?? null,
+        environment: t?.environment ?? null,
+        notes: t?.notes ?? null,
+      };
+    });
+
+    const completed = customerList.filter(c => c.status === 'COMPLETED').length;
+    const planned = customerList.filter(c => c.status === 'PLANNED').length;
+    const notPlanned = customerList.filter(c => c.status === 'NOT_PLANNED').length;
+
+    res.json({
+      data: {
+        versionId,
+        version: version.version,
+        product: version.product.name,
+        summary: {
+          total: customerList.length,
+          completed,
+          planned,
+          notPlanned,
+          completionRate: customerList.length > 0 ? Math.round((completed / customerList.length) * 100) : 0,
+        },
+        customers: customerList,
+      },
     });
   } catch (err) { next(err); }
 });

@@ -3,8 +3,13 @@ import {
   Box, Grid, Paper, Typography, Chip, LinearProgress,
   Skeleton, List, ListItem, ListItemText, ListItemIcon,
   Button, Divider, Stack, Collapse, IconButton, Tooltip, Switch, FormControlLabel,
-  CircularProgress,
+  CircularProgress, Select, MenuItem, FormControl, InputLabel, Drawer,
+  ToggleButton, ToggleButtonGroup, Autocomplete, TextField as MuiTextField,
 } from '@mui/material';
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartTooltip, Legend, ResponsiveContainer,
+  BarChart, Bar,
+} from 'recharts';
 import WarningIcon from '@mui/icons-material/Warning';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import HourglassTopIcon from '@mui/icons-material/HourglassTop';
@@ -21,6 +26,7 @@ import TimelineIcon from '@mui/icons-material/Timeline';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import BuildIcon from '@mui/icons-material/Build';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import UpdateIcon from '@mui/icons-material/Update';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
@@ -33,12 +39,15 @@ type DashboardSummary = {
   criticalIssues: number;
   pendingHotfixes: number;
   completedThisMonth: number;
+  activeVersions: number;
+  openIssues: number;
 };
 
 type ActiveRelease = {
   id: string; version: string; phase: string;
   healthScore: number;
   product: { id: string; name: string };
+  customerTransition?: { total: number; completed: number; ratio: number | null };
 };
 
 type PendingAction = {
@@ -62,6 +71,35 @@ type DoraMetrics = {
   changeFailureRate: { value: number; unit: string; rating: DoraRating; failedReleases: number; totalReleases: number };
   mttr: { value: number; unit: string; rating: DoraRating; resolvedIssues: number };
 };
+
+type DoraTrendPoint = { period: string; value: number };
+type DoraTrend = {
+  periods: string[];
+  series: Record<string, DoraTrendPoint[]>;
+  periodChangePct: Record<string, number | null>;
+};
+
+type ReleaseOpsData = {
+  cycleTimeDays: number;
+  mrThroughput: number;
+  pipelineSuccessRate: number | null;
+  avgTodosPerVersion: number;
+  releasedVersionCount: number;
+  periodDays: number;
+};
+
+type TodoTrendPoint = {
+  versionId: string; version: string; product: string;
+  total: number; done: number; completionRate: number;
+};
+
+type TransitionDetail = {
+  versionId: string; version: string; product: string;
+  summary: { total: number; completed: number; planned: number; notPlanned: number; completionRate: number };
+  customers: Array<{ customerId: string; customerName: string; customerCode: string; status: string; plannedDate: string | null; actualDate: string | null; environment: string | null; notes: string | null }>;
+};
+
+type Product = { id: string; name: string };
 
 type AwarenessData = {
   overallAwarenessScore: number;
@@ -157,6 +195,14 @@ export default function HomeDashboardPage() {
   // ── Layout preferences (persisted) ─────────────────────────────────────────
   const [sectionPrefs, setSectionPrefs] = useState<Record<string, boolean>>(() => loadSectionPrefs());
   const [showSettings, setShowSettings] = useState(false);
+  // H4-06: Period filter
+  const [periodDays, setPeriodDays] = useState(30);
+  // H4-07: Product filter
+  const [selectedProductIds, setSelectedProductIds] = useState<Product[]>([]);
+  // H4-08: Transition detail drawer
+  const [transitionDetailVersionId, setTransitionDetailVersionId] = useState<string | null>(null);
+  // H4-03: DORA metric toggle
+  const [doraTrendMetric, setDoraTrendMetric] = useState<string>('DEPLOY_FREQ');
 
   const toggleSection = (key: string) => {
     const updated = { ...sectionPrefs, [key]: !((sectionPrefs[key] ?? true)) };
@@ -197,6 +243,41 @@ export default function HomeDashboardPage() {
     enabled: isSectionVisible('dora'),
   });
 
+  const productIdsParam = selectedProductIds.map(p => p.id).join(',');
+
+  // H4-03: DORA trend
+  const { data: doraTrend, isLoading: doraTrendLoading } = useQuery<DoraTrend>({
+    queryKey: ['metrics-dora-trend', periodDays, productIdsParam],
+    queryFn: () => apiClient.get(`/metrics/dora/trend?months=${Math.ceil(periodDays / 30)}&productIds=${productIdsParam}`).then(r => r.data.data),
+    enabled: isSectionVisible('dora'),
+  });
+
+  // H4-04: Release Ops
+  const { data: releaseOps, isLoading: releaseOpsLoading } = useQuery<ReleaseOpsData>({
+    queryKey: ['metrics-release-ops', periodDays, productIdsParam],
+    queryFn: () => apiClient.get(`/metrics/release-ops?days=${periodDays}&productIds=${productIdsParam}`).then(r => r.data.data),
+    enabled: isSectionVisible('release-ops'),
+  });
+
+  const { data: todoTrend = [], isLoading: todoTrendLoading } = useQuery<TodoTrendPoint[]>({
+    queryKey: ['metrics-todo-trend', periodDays, productIdsParam],
+    queryFn: () => apiClient.get(`/metrics/release-ops/todo-trend?productIds=${productIdsParam}`).then(r => r.data.data),
+    enabled: isSectionVisible('release-ops'),
+  });
+
+  // H4-07: Products list
+  const { data: allProducts = [] } = useQuery<Product[]>({
+    queryKey: ['products-list-filter'],
+    queryFn: () => apiClient.get('/products').then(r => (r.data.data ?? r.data) as Product[]),
+  });
+
+  // H4-08: Transition detail
+  const { data: transitionDetail, isLoading: transitionDetailLoading } = useQuery<TransitionDetail>({
+    queryKey: ['version-transition-detail', transitionDetailVersionId],
+    queryFn: () => apiClient.get(`/dashboard/version-transition/${transitionDetailVersionId}`).then(r => r.data.data),
+    enabled: !!transitionDetailVersionId,
+  });
+
   const { data: awareness, isLoading: awarenessLoading } = useQuery<AwarenessData>({
     queryKey: ['metrics-awareness'],
     queryFn: () => apiClient.get('/metrics/awareness').then(r => r.data.data),
@@ -211,16 +292,45 @@ export default function HomeDashboardPage() {
     enabled: isSectionVisible('awareness'),
   });
 
+  const { data: cpmMappingsRaw } = useQuery<{ data: { id: string; customerId: string; updatedAt?: string; productVersion: { id: string; version: string; product: { id: string; name: string } } }[] }>({
+    queryKey: ['cpm-stale-summary'],
+    queryFn: () => apiClient.get('/customer-product-mappings').then(r => r.data),
+    enabled: isSectionVisible('service-matrix'),
+  });
+
   return (
     <Box>
       {/* ── Başlık + Layout Ayarları ──────────────────────────────────────── */}
-      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3} flexWrap="wrap" gap={1}>
         <Typography variant="h5" fontWeight={700}>Ana Dashboard</Typography>
-        <Tooltip title="Widget görünürlüğünü düzenle">
-          <IconButton size="small" onClick={() => setShowSettings(s => !s)}>
-            <TuneIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
+        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+          {/* H4-07: Product multi-select filter */}
+          <Autocomplete
+            multiple size="small"
+            options={allProducts}
+            getOptionLabel={(p: Product) => p.name}
+            value={selectedProductIds}
+            onChange={(_e, v) => setSelectedProductIds(v as Product[])}
+            renderInput={params => <MuiTextField {...params} label="Ürün Filtresi" />}
+            sx={{ minWidth: 180 }}
+          />
+          {/* H4-06: Period filter */}
+          <FormControl size="small" sx={{ minWidth: 120 }}>
+            <InputLabel>Dönem</InputLabel>
+            <Select label="Dönem" value={periodDays} onChange={e => setPeriodDays(Number(e.target.value))}>
+              <MenuItem value={7}>Son 7 gün</MenuItem>
+              <MenuItem value={30}>Son 30 gün</MenuItem>
+              <MenuItem value={90}>Son 90 gün</MenuItem>
+              <MenuItem value={180}>Son 6 ay</MenuItem>
+              <MenuItem value={365}>Son 1 yıl</MenuItem>
+            </Select>
+          </FormControl>
+          <Tooltip title="Widget görünürlüğünü düzenle">
+            <IconButton size="small" onClick={() => setShowSettings(s => !s)}>
+              <TuneIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Stack>
       </Stack>
 
       {/* ── Layout Customization Panel ─────────────────────────────────────── */}
@@ -234,10 +344,12 @@ export default function HomeDashboardPage() {
               { key: 'stats', label: 'İstatistikler' },
               { key: 'dora', label: 'DORA Metrikleri' },
               { key: 'awareness', label: 'Awareness Skorları' },
-              { key: 'active', label: 'Aktif Release\'ler' },
-              { key: 'upcoming', label: 'Yaklaşan Release\'ler' },
+              { key: 'release-ops', label: 'Release Ops' },
+              { key: 'active', label: "Aktif Release'ler" },
+              { key: 'upcoming', label: "Yaklaşan Release'ler" },
               { key: 'actions', label: 'Bekleyen Aksiyonlar' },
               { key: 'quickaccess', label: 'Hızlı Erişim' },
+              { key: 'service-matrix', label: 'Stale Servisler' },
             ].map(({ key, label }) => (
               <FormControlLabel
                 key={key}
@@ -255,35 +367,28 @@ export default function HomeDashboardPage() {
         </Paper>
       </Collapse>
 
-      {/* ── Bölüm A: 3 Stat Cards ─────────────────────────────────────────── */}
+      {/* ── Bölüm A: 5 Stat Cards (H4-01) ────────────────────────────────── */}
       {isSectionVisible('stats') && (
         <Grid container spacing={2} sx={{ mb: 4 }}>
-          <Grid size={{ xs: 12, sm: 4 }}>
-            <StatCard
-              label="Kritik Alert"
-              value={summary?.criticalIssues ?? '—'}
-              icon={<WarningIcon sx={{ fontSize: 40 }} />}
-              color="#ef4444"
-              loading={sumLoading}
-            />
+          <Grid size={{ xs: 12, sm: 6, md: 2.4 }}>
+            <StatCard label="Kritik Alert" value={summary?.criticalIssues ?? '—'}
+              icon={<WarningIcon sx={{ fontSize: 40 }} />} color="#ef4444" loading={sumLoading} />
           </Grid>
-          <Grid size={{ xs: 12, sm: 4 }}>
-            <StatCard
-              label="Bekleyen Onay"
-              value={summary?.pendingHotfixes ?? '—'}
-              icon={<HourglassTopIcon sx={{ fontSize: 40 }} />}
-              color="#f59e0b"
-              loading={sumLoading}
-            />
+          <Grid size={{ xs: 12, sm: 6, md: 2.4 }}>
+            <StatCard label="Bekleyen Onay" value={summary?.pendingHotfixes ?? '—'}
+              icon={<HourglassTopIcon sx={{ fontSize: 40 }} />} color="#f59e0b" loading={sumLoading} />
           </Grid>
-          <Grid size={{ xs: 12, sm: 4 }}>
-            <StatCard
-              label="Bu Ay Tamamlanan"
-              value={summary?.completedThisMonth ?? '—'}
-              icon={<CheckCircleIcon sx={{ fontSize: 40 }} />}
-              color="#10b981"
-              loading={sumLoading}
-            />
+          <Grid size={{ xs: 12, sm: 6, md: 2.4 }}>
+            <StatCard label="Bu Ay Release" value={summary?.completedThisMonth ?? '—'}
+              icon={<CheckCircleIcon sx={{ fontSize: 40 }} />} color="#10b981" loading={sumLoading} />
+          </Grid>
+          <Grid size={{ xs: 12, sm: 6, md: 2.4 }}>
+            <StatCard label="Devam Eden Versiyonlar" value={summary?.activeVersions ?? '—'}
+              icon={<BuildIcon sx={{ fontSize: 40 }} />} color="#6366f1" loading={sumLoading} />
+          </Grid>
+          <Grid size={{ xs: 12, sm: 6, md: 2.4 }}>
+            <StatCard label="Açık Sorun" value={summary?.openIssues ?? '—'}
+              icon={<ErrorOutlineIcon sx={{ fontSize: 40 }} />} color="#ec4899" loading={sumLoading} />
           </Grid>
         </Grid>
       )}
@@ -396,11 +501,42 @@ export default function HomeDashboardPage() {
               </Grid>
             )}
           </Grid>
+
+          {/* H4-03: DORA trend chart */}
+          <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 2 }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
+              <Typography variant="body2" fontWeight={600}>Haftalık Trend</Typography>
+              <ToggleButtonGroup
+                size="small" value={doraTrendMetric} exclusive
+                onChange={(_e, v) => v && setDoraTrendMetric(v)}>
+                <ToggleButton value="DEPLOY_FREQ">DF</ToggleButton>
+                <ToggleButton value="LEAD_TIME">LT</ToggleButton>
+                <ToggleButton value="CHANGE_FAIL_RATE">CFR</ToggleButton>
+                <ToggleButton value="MTTR">MTTR</ToggleButton>
+              </ToggleButtonGroup>
+            </Stack>
+            {doraTrendLoading ? (
+              <Skeleton height={180} />
+            ) : (doraTrend?.series?.[doraTrendMetric]?.length ?? 0) > 0 ? (
+              <ResponsiveContainer width="100%" height={180}>
+                <LineChart data={doraTrend!.series[doraTrendMetric]}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="period" tick={{ fontSize: 10 }} />
+                  <YAxis tick={{ fontSize: 10 }} />
+                  <RechartTooltip />
+                  <Line type="monotone" dataKey="value" stroke="#6366f1" dot={false} strokeWidth={2} />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                Trend verisi yok. DORA Calculator çalışmadan önce MetricSnapshot oluşturulmalı.
+              </Typography>
+            )}
+          </Paper>
         </>
       )}
 
-      {/* ── Bölüm A3: Awareness Scores ────────────────────────────────────── */}
-      {isSectionVisible('awareness') && (
+      {/* ── Bölüm A3: Awareness Scores ────────────────────────────────────── */}      {isSectionVisible('awareness') && (
         <>
           <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1.5 }}>
             <VisibilityIcon sx={{ fontSize: 18, mr: 0.5, mb: -0.3 }} />Farkındalık Skorları
@@ -516,6 +652,78 @@ export default function HomeDashboardPage() {
         </>
       )}
 
+      {/* ── H4-04: Release Ops Section ────────────────────────────────────── */}
+      {isSectionVisible('release-ops') && (
+        <>
+          <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1.5 }}>
+            <BuildIcon sx={{ fontSize: 18, mr: 0.5, mb: -0.3 }} />Release Ops Metrikleri
+          </Typography>
+          <Grid container spacing={2} sx={{ mb: 2 }}>
+            {releaseOpsLoading ? (
+              [1, 2, 3, 4].map(i => (
+                <Grid key={i} size={{ xs: 12, sm: 6, md: 3 }}>
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}><Skeleton height={60} /></Paper>
+                </Grid>
+              ))
+            ) : releaseOps ? (
+              <>
+                <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                    <Typography variant="caption" color="text.secondary">Cycle Time</Typography>
+                    <Typography variant="h5" fontWeight={700}>{releaseOps.cycleTimeDays} gün</Typography>
+                    <Typography variant="caption" color="text.secondary">Geliştirme → Yayın</Typography>
+                  </Paper>
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                    <Typography variant="caption" color="text.secondary">MR Throughput</Typography>
+                    <Typography variant="h5" fontWeight={700}>{releaseOps.mrThroughput}</Typography>
+                    <Typography variant="caption" color="text.secondary">Ort. commit/versiyon</Typography>
+                  </Paper>
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                    <Typography variant="caption" color="text.secondary">Pipeline Başarı</Typography>
+                    <Typography variant="h5" fontWeight={700}>
+                      {releaseOps.pipelineSuccessRate !== null ? `%${releaseOps.pipelineSuccessRate}` : '—'}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">MetricSnapshot'tan</Typography>
+                  </Paper>
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                    <Typography variant="caption" color="text.secondary">Ort. Todo / Versiyon</Typography>
+                    <Typography variant="h5" fontWeight={700}>{releaseOps.avgTodosPerVersion}</Typography>
+                    <Typography variant="caption" color="text.secondary">{releaseOps.releasedVersionCount} versiyon baz alındı</Typography>
+                  </Paper>
+                </Grid>
+              </>
+            ) : null}
+          </Grid>
+          {/* Todo trend bar chart */}
+          {todoTrendLoading ? (
+            <Skeleton height={200} sx={{ mb: 4 }} />
+          ) : todoTrend.length > 0 ? (
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 4 }}>
+              <Typography variant="body2" fontWeight={600} mb={1}>Todo Tamamlanma Trendi (Son {todoTrend.length} Versiyon)</Typography>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={todoTrend}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="version" tick={{ fontSize: 10 }} />
+                  <YAxis tick={{ fontSize: 10 }} />
+                  <RechartTooltip />
+                  <Legend />
+                  <Bar dataKey="total" name="Toplam" fill="#94a3b8" />
+                  <Bar dataKey="done" name="Tamamlanan" fill="#10b981" />
+                </BarChart>
+              </ResponsiveContainer>
+            </Paper>
+          ) : (
+            <Box sx={{ mb: 4 }} />
+          )}
+        </>
+      )}
+
       {/* ── Bölüm B: Aktif Release'ler ─────────────────────────────────────── */}
       {isSectionVisible('active') && (
         <>
@@ -531,7 +739,7 @@ export default function HomeDashboardPage() {
               <Box component="table" sx={{ width: '100%', borderCollapse: 'collapse' }}>
                 <Box component="thead" sx={{ bgcolor: 'action.hover' }}>
                   <Box component="tr">
-                    {['Ürün', 'Versiyon', 'Faz', 'Sağlık', 'Detay'].map(h => (
+                    {['Ürün', 'Versiyon', 'Faz', 'Sağlık', 'Müşteri Geçişi', 'Detay'].map(h => (
                       <Box component="th" key={h} sx={{ px: 2, py: 1.5, textAlign: 'left', fontSize: 12, fontWeight: 700, color: 'text.secondary' }}>
                         {h}
                       </Box>
@@ -562,6 +770,27 @@ export default function HomeDashboardPage() {
                             %{rel.healthScore}
                           </Typography>
                         </Stack>
+                      </Box>
+                      {/* H4-02: Müşteri Geçişi */}
+                      <Box component="td" sx={{ px: 2, py: 1.5 }}>
+                        {rel.customerTransition && rel.customerTransition.total > 0 ? (
+                          <Stack direction="row" alignItems="center" spacing={0.5}>
+                            <Typography variant="caption">
+                              {rel.customerTransition.completed}/{rel.customerTransition.total}
+                            </Typography>
+                            {rel.customerTransition.ratio !== null && (
+                              <Typography variant="caption" color="text.secondary">
+                                (%{rel.customerTransition.ratio})
+                              </Typography>
+                            )}
+                            <Button size="small" variant="text" sx={{ minWidth: 0, px: 0.5, fontSize: 10 }}
+                              onClick={() => setTransitionDetailVersionId(rel.id)}>
+                              Detay
+                            </Button>
+                          </Stack>
+                        ) : (
+                          <Typography variant="caption" color="text.secondary">—</Typography>
+                        )}
                       </Box>
                       <Box component="td" sx={{ px: 2, py: 1.5 }}>
                         <Button size="small" endIcon={<ArrowForwardIcon />}
@@ -692,6 +921,110 @@ export default function HomeDashboardPage() {
           </Grid>
         )}
       </Grid>
+
+      {/* ── Bölüm F-05: Stale Servisler Widget ───────────────────────────────── */}
+      {isSectionVisible('service-matrix') && (() => {
+        const STALE_DAYS = 90;
+        const allMappings = cpmMappingsRaw?.data ?? [];
+        const now = Date.now();
+        const staleMappings = allMappings.filter(m => {
+          if (!m.updatedAt) return false;
+          const days = (now - new Date(m.updatedAt).getTime()) / (1000 * 60 * 60 * 24);
+          return days > STALE_DAYS;
+        });
+
+        // Group by product
+        const byProduct = new Map<string, { name: string; count: number }>();
+        for (const m of staleMappings) {
+          const pid = m.productVersion.product.id;
+          const existing = byProduct.get(pid);
+          if (existing) {
+            existing.count++;
+          } else {
+            byProduct.set(pid, { name: m.productVersion.product.name, count: 1 });
+          }
+        }
+        const breakdown = [...byProduct.values()].sort((a, b) => b.count - a.count);
+
+        return (
+          <Paper variant="outlined" sx={{ borderRadius: 2, p: 2, mb: 3, border: staleMappings.length > 0 ? '1px solid' : undefined, borderColor: staleMappings.length > 0 ? 'warning.main' : undefined }}>
+            <Stack direction="row" alignItems="center" spacing={1} mb={1.5}>
+              <UpdateIcon color={staleMappings.length > 0 ? 'warning' : 'disabled'} />
+              <Typography variant="subtitle1" fontWeight={700}>
+                Güncel Olmayan Servisler
+              </Typography>
+              <Chip
+                size="small"
+                label={staleMappings.length}
+                color={staleMappings.length > 0 ? 'warning' : 'default'}
+              />
+              <Typography variant="caption" color="text.secondary">
+                (+{STALE_DAYS} gün güncellenmemiş müşteri-ürün eşleşmeleri)
+              </Typography>
+            </Stack>
+
+            {staleMappings.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">Tüm müşteri-ürün eşleşmeleri güncel. ✅</Typography>
+            ) : (
+              <Stack spacing={0.75}>
+                {breakdown.map(b => (
+                  <Stack key={b.name} direction="row" justifyContent="space-between" alignItems="center">
+                    <Typography variant="body2">{b.name}</Typography>
+                    <Chip size="small" label={`${b.count} müşteri`} color="warning" variant="outlined" />
+                  </Stack>
+                ))}
+              </Stack>
+            )}
+          </Paper>
+        );
+      })()}
+
+      {/* ── H4-08: Version Transition Detail Drawer ─────────────────────── */}
+      <Drawer anchor="right" open={!!transitionDetailVersionId}
+        onClose={() => setTransitionDetailVersionId(null)}
+        PaperProps={{ sx: { width: { xs: '100%', sm: 520 }, p: 3 } }}>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
+          <Typography variant="h6" fontWeight={700}>Müşteri Geçiş Durumu</Typography>
+          <IconButton onClick={() => setTransitionDetailVersionId(null)}><SpeedIcon /></IconButton>
+        </Stack>
+        {transitionDetailLoading ? (
+          <Skeleton height={200} />
+        ) : transitionDetail ? (
+          <>
+            <Typography variant="body2" color="text.secondary" mb={1}>
+              {transitionDetail.product} — v{transitionDetail.version}
+            </Typography>
+            <Stack direction="row" spacing={1} mb={2} flexWrap="wrap">
+              <Chip label={`${transitionDetail.summary.completed} Geçti`} color="success" size="small" />
+              <Chip label={`${transitionDetail.summary.planned} Planlandı`} color="info" size="small" />
+              <Chip label={`${transitionDetail.summary.notPlanned} Planlamadı`} color="default" size="small" />
+            </Stack>
+            <LinearProgress variant="determinate" value={transitionDetail.summary.completionRate}
+              color="success" sx={{ height: 8, borderRadius: 4, mb: 2 }} />
+            <Typography variant="caption" color="text.secondary" mb={2} display="block">
+              %{transitionDetail.summary.completionRate} tamamlandı ({transitionDetail.summary.total} müşteri toplam)
+            </Typography>
+            <Divider sx={{ mb: 1 }} />
+            <List dense disablePadding>
+              {transitionDetail.customers.map(c => (
+                <ListItem key={c.customerId} disableGutters
+                  secondaryAction={
+                    <Chip size="small"
+                      label={c.status === 'COMPLETED' ? 'Geçti' : c.status === 'PLANNED' ? 'Planlandı' : 'Planlamadı'}
+                      color={c.status === 'COMPLETED' ? 'success' : c.status === 'PLANNED' ? 'info' : 'default'} />
+                  }>
+                  <ListItemText
+                    primary={c.customerName}
+                    secondary={c.actualDate ? `Geçiş: ${fmtDate(c.actualDate)}` : c.plannedDate ? `Planlanan: ${fmtDate(c.plannedDate)}` : null}
+                    primaryTypographyProps={{ variant: 'body2' }}
+                    secondaryTypographyProps={{ variant: 'caption' }}
+                  />
+                </ListItem>
+              ))}
+            </List>
+          </>
+        ) : null}
+      </Drawer>
     </Box>
   );
 }

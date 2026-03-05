@@ -39,7 +39,7 @@ export default function Layout() {
         onMobileClose={() => setMobileOpen(false)}
       />
 
-      <Box component="main" sx={{ flexGrow: 1, ml: `${DRAWER_WIDTH}px`, mt: '64px', p: 3 }}>
+      <Box component="main" sx={{ flexGrow: 1, mt: '64px', p: 2 }}>
         <Outlet />
       </Box>
     </Box>

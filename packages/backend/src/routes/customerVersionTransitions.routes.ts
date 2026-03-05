@@ -3,6 +3,7 @@ import { z } from 'zod';
 import prisma from '../lib/prisma';
 import { authenticateJWT, requireRole } from '../middleware/auth.middleware';
 import { AppError } from '../middleware/errorHandler.middleware';
+import { cascadeServiceVersions } from '../lib/serviceVersionCascade';
 
 const router = Router();
 router.use(authenticateJWT);
@@ -90,6 +91,24 @@ router.post('/', async (req, res, next) => {
     const toVersion = await prisma.productVersion.findUnique({ where: { id: data.toVersionId } });
     if (!toVersion) throw new AppError(404, 'Hedef versiyon bulunamadı');
 
+    // E3-01: Sequential environment order check
+    const ENV_ORDER = ['TEST', 'PRE_PROD', 'PROD'];
+    const envIndex = ENV_ORDER.indexOf(data.environment);
+    if (envIndex > 0) {
+      const prevEnv = ENV_ORDER[envIndex - 1];
+      const prevTransition = await prisma.customerVersionTransition.findFirst({
+        where: {
+          customerId: data.customerId,
+          toVersionId: data.toVersionId,
+          environment: prevEnv,
+          status: 'COMPLETED',
+        },
+      });
+      if (!prevTransition) {
+        throw new AppError(400, `Önce ${prevEnv} geçişini tamamlayın.`);
+      }
+    }
+
     // Upsert by unique [customerId, toVersionId, environment]
     const item = await prisma.customerVersionTransition.upsert({
       where: {
@@ -155,7 +174,7 @@ router.patch('/:id', async (req, res, next) => {
       include: cvtInclude,
     });
 
-    // If PROD actual date was just set → update CPM.currentVersionId
+    // If PROD actual date was just set → update CPM.currentVersionId + cascade CustomerServiceVersion
     if (newActualDate && existing.environment === 'PROD') {
       const productId = updated.toVersion.product.id;
       const cpm = await prisma.customerProductMapping.findFirst({
@@ -165,6 +184,41 @@ router.patch('/:id', async (req, res, next) => {
         await prisma.customerProductMapping.update({
           where: { id: cpm.id },
           data: { currentVersionId: existing.toVersionId },
+        });
+      }
+      // Cascade CustomerServiceVersion snapshot records
+      await cascadeServiceVersions(existing.id, newActualDate);
+    }
+
+    // E3-02: actualDate → ServiceVersion cascade
+    if (newActualDate) {
+      // Find the primary package version string (HELM_CHART or DOCKER_IMAGE preferred)
+      const primaryPkg = await prisma.versionPackage.findFirst({
+        where: {
+          productVersionId: existing.toVersionId,
+          packageType: { in: ['HELM_CHART', 'DOCKER_IMAGE'] },
+        },
+        orderBy: { publishedAt: 'desc' },
+      });
+      const releaseVersion = primaryPkg?.version ?? updated.toVersion.version;
+
+      // Find all ServiceVersion records for this productVersion
+      const serviceVersions = await prisma.serviceVersion.findMany({
+        where: { productVersionId: existing.toVersionId },
+        select: { id: true, serviceId: true },
+      });
+
+      if (serviceVersions.length > 0) {
+        const updateData: Record<string, unknown> = {
+          lastCheckedAt: new Date(),
+          isStale: false,
+        };
+        if (existing.environment === 'PROD') updateData.prodVersion = releaseVersion;
+        if (existing.environment === 'PRE_PROD') updateData.prepVersion = releaseVersion;
+
+        await prisma.serviceVersion.updateMany({
+          where: { id: { in: serviceVersions.map(sv => sv.id) } },
+          data: updateData,
         });
       }
     }

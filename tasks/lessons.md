@@ -133,3 +133,27 @@ Bu dosya her düzeltmeden sonra güncellenir. Copilot her oturum başında buray
 - `git/*` → proje-scope URL ✓
 - `wit/workitems` → org-level URL (proje olmadan)
 - URL'de `&&` olmamalı; path'ten trailing `&` strip edilmeli
+
+---
+
+## 2026-03-03
+
+### L014 — Terminal heredoc ile dosya yazma çalışıyor gibi görünür ama içerik kaybolur
+**Durum:** UX Designer `designs/screens/release-health-check.md` dosyasına Go/No-Go bölümünü "yazdı" — dosyaya hiçbir şey eklenmedi.
+**Sorun:** VS Code Copilot terminali `cat >> dosya << 'EOF'` heredoc komutlarını güvenlik nedeniyle "simplify" edip düzleştiriyor. Komut exit 0 dönüyor, başarılı görünüyor ama içerik hiç yazılmıyor. Agent grep doğrulaması yapmadığı için ✅ olarak işaretledi.
+**Çözüm:**
+- Dosya yaz/güncelle → **her zaman** `replace_string_in_file` veya `create_file` tool kullan
+- Terminal `echo`, `cat >>`, heredoc ile asla dosya yazma
+- Yazım sonrası `grep -n "anahtar_kelime" dosya.md` ile doğrula — boş dönerse yazma başarısız
+**Etkilenen roller:** Tümü — özellikle UX Designer, QA Engineer, Release Manager (markdown çıktısı üretenler)
+
+---
+
+### L013 — Context kaybını proaktif bildir
+**Durum:** Uzun oturumlarda conversation summary'ye düşüldüğünde veya çok sayıda task eritilirken, agent detay kaybedip hatalı varsayımlar yapabiliyor.
+**Sorun:** Kullanıcı, context'in kaybolduğunu ancak sonuçlardaki hatalardan fark ediyor — bu noktada geri dönmek maliyetli.
+**Çözüm:** Aşağıdaki durumlarda agent proaktif bildirim yapar:
+1. **Summary moduna düşünce** — "⚠️ Önceki mesajları artık summary'den okuyorum, kritik bir detay kaçırıyorsam söyle."
+2. **Backlog task'ı sırasında design doc referansı belirsizleşince** — Tekrar oku, eğer ciddi kopukluk varsa "⚠️ Context kırılması: [konu] — tekrar okuyorum" de.
+3. **5+ task art arda eritirken** — Her 3-4 task'ta kısa durum özeti ver.
+**Kural:** Context kaybını sessizce yutma. "Emin değilim ama devam edeyim" yerine "⚠️ Context kırılması" bildirimi yap. Backlog'un grep doğrulaması zaten son savunma hattı.

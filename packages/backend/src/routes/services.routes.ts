@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../lib/prisma';
-import { authenticateJWT, requireRole } from '../middleware/auth.middleware';
+import { authenticateJWT, requireRole, filterByUserProducts } from '../middleware/auth.middleware';
 import { AppError } from '../middleware/errorHandler.middleware';
 import { encryptIfNeeded, mask } from '../lib/encryption';
 
 const router = Router();
 router.use(authenticateJWT);
+router.use(filterByUserProducts);
 
 // ── Enums ──
 const CONTAINER_PLATFORMS = ['RANCHER', 'OPENSHIFT', 'KUBERNETES', 'DOCKER_COMPOSE'] as const;
@@ -69,6 +70,7 @@ router.get('/', async (req, res, next) => {
   try {
     const { productId, moduleId } = req.query;
     const where: Record<string, unknown> = {};
+    if (req.accessibleProductIds) where.productId = { in: req.accessibleProductIds };
     if (productId) where.productId = String(productId);
     if (moduleId) where.moduleId = String(moduleId);
     const items = await prisma.service.findMany({

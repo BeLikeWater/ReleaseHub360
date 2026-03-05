@@ -1,8 +1,12 @@
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
+import { authenticateJWT } from '../middleware/auth.middleware';
 
 const router = Router();
 const prisma = new PrismaClient();
+
+// Tüm metrik endpoint'leri auth gerektirir
+router.use(authenticateJWT);
 
 // ── GET /api/metrics/snapshots ────────────────────────────────────────────────
 router.get('/snapshots', async (req: Request, res: Response) => {
@@ -234,7 +238,7 @@ router.get('/awareness', async (req: Request, res: Response) => {
       include: {
         versions: {
           where: { phase: 'PRODUCTION' },
-          orderBy: { releaseDate: 'desc' },
+          orderBy: [{ releaseDate: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
           take: 1,
           select: { id: true, version: true },
         },
@@ -416,6 +420,330 @@ router.get('/awareness-scores', async (_req: Request, res: Response) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Awareness skorları hesaplanamadı' });
+  }
+});
+
+// ── H1-03: GET /api/metrics/dora/trend ────────────────────────────────────────
+// Returns weekly DORA metric time series from MetricSnapshot.
+// Query: ?months=6&productIds=id1,id2
+router.get('/dora/trend', async (req: Request, res: Response) => {
+  try {
+    const months = Math.min(parseInt(String(req.query.months ?? '6'), 10), 24);
+    const productIds = req.query.productIds
+      ? String(req.query.productIds).split(',').filter(Boolean)
+      : undefined;
+
+    const since = new Date();
+    since.setMonth(since.getMonth() - months);
+
+    const snapshots = await prisma.metricSnapshot.findMany({
+      where: {
+        periodType: 'WEEK',
+        metricType: { in: ['DEPLOY_FREQ', 'LEAD_TIME', 'CHANGE_FAIL_RATE', 'MTTR'] },
+        computedAt: { gte: since },
+        ...(productIds ? { productId: { in: productIds } } : {}),
+      },
+      orderBy: { period: 'asc' },
+      select: { period: true, productId: true, metricType: true, value: true },
+    });
+
+    // Group by metricType → periods → aggregate across products
+    const grouped: Record<string, Record<string, number[]>> = {};
+    for (const s of snapshots) {
+      if (!grouped[s.metricType]) grouped[s.metricType] = {};
+      if (!grouped[s.metricType][s.period]) grouped[s.metricType][s.period] = [];
+      grouped[s.metricType][s.period].push(s.value);
+    }
+
+    const periods = [...new Set(snapshots.map(s => s.period))].sort();
+    const series: Record<string, { period: string; value: number }[]> = {};
+    for (const [metric, periodMap] of Object.entries(grouped)) {
+      series[metric] = periods
+        .filter(p => periodMap[p])
+        .map(p => {
+          const vals = periodMap[p];
+          const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+          return { period: p, value: Math.round(avg * 100) / 100 };
+        });
+    }
+
+    // Period-over-period change (last vs previous period)
+    const changes: Record<string, number | null> = {};
+    for (const [metric, data] of Object.entries(series)) {
+      if (data.length >= 2) {
+        const last = data[data.length - 1].value;
+        const prev = data[data.length - 2].value;
+        changes[metric] = prev !== 0 ? Math.round(((last - prev) / prev) * 100) : null;
+      } else {
+        changes[metric] = null;
+      }
+    }
+
+    res.json({ data: { periods, series, periodChangePct: changes } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'DORA trend verisi alınamadı' });
+  }
+});
+
+// ── H2-01: GET /api/metrics/release-ops ───────────────────────────────────────
+// Cycle Time, MR Throughput, Pipeline Success Rate, Todo Count per Version
+router.get('/release-ops', async (req: Request, res: Response) => {
+  try {
+    const days = parseInt(String(req.query.days ?? '30'), 10);
+    const productIds = req.query.productIds
+      ? String(req.query.productIds).split(',').filter(Boolean)
+      : undefined;
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const whereVersion = {
+      phase: 'RELEASED',
+      actualReleaseDate: { gte: since },
+      ...(productIds ? { productId: { in: productIds } } : {}),
+    };
+
+    const [releasedVersions, pipelineSnapshots, todos] = await Promise.all([
+      prisma.productVersion.findMany({
+        where: whereVersion,
+        select: { id: true, devStartDate: true, actualReleaseDate: true, productId: true, commitCount: true },
+      }),
+      prisma.metricSnapshot.findMany({
+        where: {
+          metricType: 'PIPELINE_SUCCESS_RATE',
+          computedAt: { gte: since },
+          ...(productIds ? { productId: { in: productIds } } : {}),
+        },
+        select: { value: true, productId: true },
+      }),
+      prisma.releaseTodo.findMany({
+        where: {
+          productVersion: {
+            phase: 'RELEASED',
+            actualReleaseDate: { gte: since },
+            ...(productIds ? { productId: { in: productIds } } : {}),
+          },
+        },
+        select: { isCompleted: true, productVersionId: true },
+      }),
+    ]);
+
+    // Cycle Time: avg days from devStartDate → actualReleaseDate
+    const ctValues = releasedVersions
+      .filter(v => v.devStartDate && v.actualReleaseDate)
+      .map(v => (v.actualReleaseDate!.getTime() - v.devStartDate!.getTime()) / (1000 * 60 * 60 * 24));
+    const avgCycleTimeDays = ctValues.length > 0
+      ? Math.round((ctValues.reduce((a, b) => a + b, 0) / ctValues.length) * 10) / 10
+      : 0;
+
+    // MR Throughput: avg commits per version
+    const commitValues = releasedVersions.filter(v => v.commitCount != null).map(v => v.commitCount!);
+    const avgCommitsPerVersion = commitValues.length > 0
+      ? Math.round((commitValues.reduce((a, b) => a + b, 0) / commitValues.length) * 10) / 10
+      : 0;
+
+    // Pipeline Success Rate: from MetricSnapshot (collected by M-01 later)
+    const avgPipelineSuccess = pipelineSnapshots.length > 0
+      ? Math.round((pipelineSnapshots.reduce((a, s) => a + s.value, 0) / pipelineSnapshots.length) * 10) / 10
+      : null;
+
+    // Avg todos per version
+    const versionTodoCounts: Record<string, { total: number; done: number }> = {};
+    for (const t of todos) {
+      const vId = t.productVersionId;
+      if (!vId) continue;
+      if (!versionTodoCounts[vId]) versionTodoCounts[vId] = { total: 0, done: 0 };
+      versionTodoCounts[vId].total++;
+      if (t.isCompleted) versionTodoCounts[vId].done++;
+    }
+    const todoCountValues = Object.values(versionTodoCounts).map(c => c.total);
+    const avgTodosPerVersion = todoCountValues.length > 0
+      ? Math.round((todoCountValues.reduce((a, b) => a + b, 0) / todoCountValues.length) * 10) / 10
+      : 0;
+
+    res.json({
+      data: {
+        cycleTimeDays: avgCycleTimeDays,
+        mrThroughput: avgCommitsPerVersion,
+        pipelineSuccessRate: avgPipelineSuccess,
+        avgTodosPerVersion,
+        releasedVersionCount: releasedVersions.length,
+        periodDays: days,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Release ops metrikleri alınamadı' });
+  }
+});
+
+// ── H2-02: GET /api/metrics/release-ops/todo-trend ────────────────────────────
+// Last N versions: todo count (total + done + completion rate) per version
+router.get('/release-ops/todo-trend', async (req: Request, res: Response) => {
+  try {
+    const limit = Math.min(parseInt(String(req.query.n ?? '10'), 10), 50);
+    const productIds = req.query.productIds
+      ? String(req.query.productIds).split(',').filter(Boolean)
+      : undefined;
+
+    const versions = await prisma.productVersion.findMany({
+      where: {
+        phase: 'RELEASED',
+        ...(productIds ? { productId: { in: productIds } } : {}),
+      },
+      orderBy: { actualReleaseDate: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        version: true,
+        actualReleaseDate: true,
+        product: { select: { name: true } },
+        releaseTodos: { select: { isCompleted: true } },
+      },
+    });
+
+    const trend = versions
+      .map(v => {
+        const total = v.releaseTodos.length;
+        const done = v.releaseTodos.filter((t: { isCompleted: boolean }) => t.isCompleted).length;
+        return {
+          versionId: v.id,
+          version: v.version,
+          product: v.product.name,
+          releaseDate: v.actualReleaseDate,
+          total,
+          done,
+          completionRate: total > 0 ? Math.round((done / total) * 100) : 100,
+        };
+      })
+      .reverse(); // ascending order for charts
+
+    res.json({ data: trend });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Todo trend verisi alınamadı' });
+  }
+});
+
+// ── H3-02: Awareness Detail Endpoints ─────────────────────────────────────────
+// GET /api/metrics/awareness/codebase-detail
+router.get('/awareness/codebase-detail', async (_req: Request, res: Response) => {
+  try {
+    const branches = await prisma.customerBranch.findMany({
+      where: { isActive: true },
+      include: {
+        customer: { select: { id: true, name: true } },
+        syncHistory: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { createdAt: true, status: true },
+        },
+      },
+    });
+
+    const now = Date.now();
+    const data = branches.map(b => {
+      const lastSync = b.syncHistory[0]?.createdAt;
+      const daysSinceSync = lastSync ? Math.floor((now - lastSync.getTime()) / (1000 * 60 * 60 * 24)) : null;
+      return {
+        customerId: b.customerId,
+        customerName: b.customer.name,
+        branchName: b.branchName,
+        repoName: b.repoName,
+        daysSinceSync,
+        lastSyncStatus: b.syncHistory[0]?.status ?? 'NEVER',
+        lastSyncAt: lastSync ?? null,
+      };
+    });
+
+    res.json({ data });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Codebase divergence detayı alınamadı' });
+  }
+});
+
+// GET /api/metrics/awareness/config-detail
+router.get('/awareness/config-detail', async (_req: Request, res: Response) => {
+  try {
+    function countKeys(obj: unknown, depth = 0): number {
+      if (typeof obj !== 'object' || obj === null || depth > 10) return 0;
+      let count = 0;
+      for (const val of Object.values(obj as Record<string, unknown>)) {
+        count += 1;
+        if (typeof val === 'object' && val !== null) count += countKeys(val, depth + 1);
+      }
+      return count;
+    }
+
+    const cpms = await prisma.customerProductMapping.findMany({
+      where: { isActive: true },
+      select: {
+        id: true,
+        customerId: true,
+        productId: true,
+        helmValuesOverrides: true,
+        customer: { select: { name: true } },
+        product: { select: { name: true } },
+      },
+    });
+
+    const data = cpms.map(c => ({
+      customerId: c.customerId,
+      customerName: c.customer.name,
+      productId: c.productId,
+      productName: c.product.name,
+      overrideKeyCount: c.helmValuesOverrides ? countKeys(c.helmValuesOverrides) : 0,
+      hasOverrides: !!c.helmValuesOverrides,
+    }));
+
+    res.json({ data });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Config difference detayı alınamadı' });
+  }
+});
+
+// GET /api/metrics/awareness/deployment-detail
+router.get('/awareness/deployment-detail', async (_req: Request, res: Response) => {
+  try {
+    const cpms = await prisma.customerProductMapping.findMany({
+      where: { isActive: true },
+      select: {
+        customerId: true,
+        productId: true,
+        artifactType: true,
+        deploymentModel: true,
+        hostingType: true,
+        customer: { select: { name: true } },
+        product: { select: { name: true } },
+      },
+    });
+
+    // Group counts by deployment type combination
+    const groupMap: Record<string, { label: string; count: number; customers: string[] }> = {};
+    for (const c of cpms) {
+      const key = [c.artifactType ?? 'N/A', c.deploymentModel ?? 'N/A', c.hostingType ?? 'N/A'].join(' + ');
+      if (!groupMap[key]) groupMap[key] = { label: key, count: 0, customers: [] };
+      groupMap[key].count++;
+      if (!groupMap[key].customers.includes(c.customer.name)) {
+        groupMap[key].customers.push(c.customer.name);
+      }
+    }
+
+    const distribution = Object.values(groupMap).sort((a, b) => b.count - a.count);
+    const details = cpms.map(c => ({
+      customerId: c.customerId,
+      customerName: c.customer.name,
+      productName: c.product.name,
+      artifactType: c.artifactType,
+      deploymentModel: c.deploymentModel,
+      hostingType: c.hostingType,
+    }));
+
+    res.json({ data: { distribution, details } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Deployment diversity detayı alınamadı' });
   }
 });
 

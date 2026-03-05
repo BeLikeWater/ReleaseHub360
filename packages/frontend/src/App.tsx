@@ -24,6 +24,18 @@ const theme = createTheme({
   typography: {
     fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif',
   },
+  components: {
+    MuiDrawer: {
+      styleOverrides: {
+        paper: ({ ownerState }: { ownerState: { anchor?: string } }) => ({
+          ...(ownerState.anchor === 'right' && {
+            top: 64,
+            height: 'calc(100% - 64px)',
+          }),
+        }),
+      },
+    },
+  },
 });
 
 export default function App() {

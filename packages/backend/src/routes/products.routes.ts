@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../lib/prisma';
-import { authenticateJWT, requireRole } from '../middleware/auth.middleware';
+import { authenticateJWT, requireRole, filterByUserProducts } from '../middleware/auth.middleware';
 import { AppError } from '../middleware/errorHandler.middleware';
 import { encryptIfNeeded, mask } from '../lib/encryption';
 
 const router = Router();
 router.use(authenticateJWT);
+router.use(filterByUserProducts);
 
 // ── Enums ──
 const SOURCE_CONTROL_TYPES = ['AZURE', 'GITHUB'] as const;
@@ -59,9 +60,10 @@ function maskProduct<T extends Record<string, unknown>>(product: T): T {
 }
 
 // GET /api/products
-router.get('/', async (_req, res, next) => {
+router.get('/', async (req, res, next) => {
   try {
     const products = await prisma.product.findMany({
+      where: req.accessibleProductIds ? { id: { in: req.accessibleProductIds } } : undefined,
       include: { _count: { select: { services: true, versions: true } } },
       orderBy: { name: 'asc' },
     });

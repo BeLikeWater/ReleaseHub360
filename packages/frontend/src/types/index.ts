@@ -161,9 +161,9 @@ export interface ProductVersion {
   phase: VersionPhase;
   targetDate: string | null;
   releaseDate: string | null;
-  masterStartDate: string | null;
+  devStartDate: string | null;
+  testStartDate: string | null;
   preProdDate: string | null;
-  testDate: string | null;
   deprecatedAt: string | null;
   description: string | null;
   notesPublished: boolean;

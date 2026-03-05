@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Box, Typography, Button, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Paper, Chip, Drawer, Divider, IconButton, Tab, Tabs,
   TextField, FormControl, InputLabel, Select, MenuItem, Avatar, Menu,
   ListItemIcon, ListItemText, Dialog, DialogTitle, DialogContent, DialogActions,
-  Tooltip, Autocomplete,
+  Tooltip, Autocomplete, Checkbox, FormGroup, FormControlLabel, Skeleton,
 } from '@mui/material';
+import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
@@ -18,34 +19,53 @@ import apiClient from '@/api/client';
 import { useAuthStore } from '@/store/authStore';
 
 type User = { id: string; email: string; name: string; role: string; isActive: boolean; createdAt: string };
-type CustomerUser = { id: string; customerId: string; email: string; name: string; role: string; isActive: boolean; createdAt: string };
+type CustomerUser = { id: string; customerId: string; email: string; name: string; customerRole: string; isActive: boolean; createdAt: string };
 type CustomerOption = { id: string; name: string };
+type Product = { id: string; name: string };
 
-const ROLES = ['ADMIN', 'RELEASE_MANAGER', 'DEVELOPER', 'VIEWER'] as const;
+const ROLES = ['ADMIN', 'RELEASE_MANAGER', 'PRODUCT_OWNER', 'DEVELOPER', 'DEVOPS_ENGINEER', 'QA_ENGINEER', 'VIEWER'] as const;
 const ROLE_LABELS: Record<string, string> = {
-  ADMIN: 'Admin', RELEASE_MANAGER: 'Release Manager', DEVELOPER: 'Developer', VIEWER: 'Viewer',
+  ADMIN: 'Admin',
+  RELEASE_MANAGER: 'Release Manager',
+  PRODUCT_OWNER: 'Product Owner',
+  DEVELOPER: 'Developer',
+  DEVOPS_ENGINEER: 'DevOps Engineer',
+  QA_ENGINEER: 'QA Engineer',
+  VIEWER: 'Viewer',
 };
 const ROLE_PERMISSIONS: Record<string, string[]> = {
   ADMIN: ['Tüm izinler', 'Kullanıcı yönetimi', 'Sistem ayarları'],
   RELEASE_MANAGER: ['Release yönetimi', 'Hotfix onay', 'Deployment tetikleme'],
+  PRODUCT_OWNER: ['Ürün yönetimi', 'Release onay', 'Müşteri görünürlüğü'],
   DEVELOPER: ['Görüntüle', 'PR işlemleri', 'Hotfix talebi'],
+  DEVOPS_ENGINEER: ['Pipeline yönetimi', 'Deployment tetikleme', 'Code Sync'],
+  QA_ENGINEER: ['Test yönetimi', 'Bug raporlama', 'Health check'],
   VIEWER: ['Sadece okuma'],
 };
 
-function roleColor(role: string): 'error' | 'primary' | 'info' | 'default' {
+function roleColor(role: string): 'error' | 'primary' | 'info' | 'success' | 'warning' | 'secondary' | 'default' {
   if (role === 'ADMIN') return 'error';
   if (role === 'RELEASE_MANAGER') return 'primary';
+  if (role === 'PRODUCT_OWNER') return 'secondary';
   if (role === 'DEVELOPER') return 'info';
+  if (role === 'DEVOPS_ENGINEER') return 'warning';
+  if (role === 'QA_ENGINEER') return 'success';
   return 'default';
 }
 
-const CUSTOMER_ROLES = ['CONTACT', 'VIEWER', 'ADMIN'] as const;
+const CUSTOMER_ROLES = ['CUSTOMER_ADMIN', 'APP_ADMIN', 'APPROVER', 'BUSINESS_USER', 'PARTNER'] as const;
 const CUSTOMER_ROLE_LABELS: Record<string, string> = {
-  CONTACT: 'İletişim', VIEWER: 'İzleyici', ADMIN: 'Yönetici',
+  CUSTOMER_ADMIN: 'Müşteri Yöneticisi',
+  APP_ADMIN: 'Uygulama Yöneticisi',
+  APPROVER: 'Onaycı',
+  BUSINESS_USER: 'İş Kullanıcısı',
+  PARTNER: 'Partner',
 };
-function customerRoleColor(role: string): 'default' | 'info' | 'error' {
-  if (role === 'ADMIN') return 'error';
-  if (role === 'VIEWER') return 'info';
+function customerRoleColor(role: string): 'error' | 'secondary' | 'warning' | 'info' | 'default' {
+  if (role === 'CUSTOMER_ADMIN') return 'error';
+  if (role === 'APP_ADMIN') return 'secondary';
+  if (role === 'APPROVER') return 'warning';
+  if (role === 'BUSINESS_USER') return 'info';
   return 'default';
 }
 
@@ -69,7 +89,11 @@ export default function UsersRolesPage() {
   const [cuCustomer, setCuCustomer] = useState<CustomerOption | null>(null);
   const [cuDrawerOpen, setCuDrawerOpen] = useState(false);
   const [cuEditTarget, setCuEditTarget] = useState<CustomerUser | null>(null);
-  const [cuForm, setCuForm] = useState({ customerId: '', name: '', email: '', role: 'VIEWER', password: '' });
+  const [cuForm, setCuForm] = useState({ customerId: '', name: '', email: '', customerRole: 'BUSINESS_USER', password: '' });
+
+  // ── Ürün Erişimi state ────────────────────────────
+  const [productAccessDialog, setProductAccessDialog] = useState<User | null>(null);
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
 
   // ── Queries ───────────────────────────────────────
   const { data: users = [], isLoading } = useQuery<User[]>({
@@ -82,6 +106,24 @@ export default function UsersRolesPage() {
     queryFn: () => apiClient.get('/customers').then(r => (r.data.data ?? r.data).map((c: { id: string; name: string }) => ({ id: c.id, name: c.name }))),
     enabled: tab === 1,
   });
+
+  const { data: allProducts = [] } = useQuery<Product[]>({
+    queryKey: ['products-list'],
+    queryFn: () => apiClient.get('/products').then(r => (r.data.data ?? r.data).map((p: { id: string; name: string }) => ({ id: p.id, name: p.name }))),
+  });
+
+  const { data: userProductAccess = [], isLoading: paLoading } = useQuery<{ productId: string }[]>({
+    queryKey: ['user-product-access', productAccessDialog?.id],
+    queryFn: () => apiClient.get(`/users/${productAccessDialog!.id}/product-access`).then(r => r.data.data ?? r.data),
+    enabled: !!productAccessDialog,
+  });
+
+  // Erişim verisi gelince seçili ID'leri güncelle
+  useEffect(() => {
+    if (userProductAccess.length > 0) {
+      setSelectedProductIds(userProductAccess.map((a) => a.productId));
+    }
+  }, [userProductAccess]);
 
   const { data: customerUsers = [], isLoading: cuLoading } = useQuery<CustomerUser[]>({
     queryKey: ['customer-users', cuCustomer?.id],
@@ -113,7 +155,7 @@ export default function UsersRolesPage() {
   // ── Customer user mutations ────────────────────────
   const cuCreateMutation = useMutation({
     mutationFn: (data: typeof cuForm) => cuEditTarget
-      ? apiClient.patch(`/customer-users/${cuEditTarget.id}`, { name: data.name, role: data.role, ...(data.password ? { password: data.password } : {}) })
+      ? apiClient.patch(`/customer-users/${cuEditTarget.id}`, { name: data.name, customerRole: data.customerRole, ...(data.password ? { password: data.password } : {}) })
       : apiClient.post('/customer-users', data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['customer-users'] });
@@ -125,6 +167,16 @@ export default function UsersRolesPage() {
   const cuDeleteMutation = useMutation({
     mutationFn: (id: string) => apiClient.delete(`/customer-users/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['customer-users'] }),
+  });
+
+  // ── Product access mutation ───────────────────────
+  const productAccessMutation = useMutation({
+    mutationFn: ({ userId, productIds }: { userId: string; productIds: string[] }) =>
+      apiClient.put(`/users/${userId}/product-access`, { productIds }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['user-product-access'] });
+      setProductAccessDialog(null);
+    },
   });
 
   const filtered = users.filter(u => {
@@ -141,13 +193,13 @@ export default function UsersRolesPage() {
 
   function openCuCreate() {
     setCuEditTarget(null);
-    setCuForm({ customerId: cuCustomer?.id ?? '', name: '', email: '', role: 'VIEWER', password: '' });
+    setCuForm({ customerId: cuCustomer?.id ?? '', name: '', email: '', customerRole: 'BUSINESS_USER', password: '' });
     setCuDrawerOpen(true);
   }
 
   function openCuEdit(cu: CustomerUser) {
     setCuEditTarget(cu);
-    setCuForm({ customerId: cu.customerId, name: cu.name, email: cu.email, role: cu.role, password: '' });
+    setCuForm({ customerId: cu.customerId, name: cu.name, email: cu.email, customerRole: cu.customerRole, password: '' });
     setCuDrawerOpen(true);
   }
 
@@ -292,7 +344,7 @@ export default function UsersRolesPage() {
                       </Typography>
                     </TableCell>
                     <TableCell>
-                      <Chip label={CUSTOMER_ROLE_LABELS[cu.role] ?? cu.role} color={customerRoleColor(cu.role)} size="small" />
+                      <Chip label={CUSTOMER_ROLE_LABELS[cu.customerRole] ?? cu.customerRole} color={customerRoleColor(cu.customerRole)} size="small" />
                     </TableCell>
                     <TableCell>
                       {cu.isActive
@@ -356,6 +408,10 @@ export default function UsersRolesPage() {
         <MenuItem onClick={() => { setEditRoleDialog({ user: menuAnchor!.user, role: menuAnchor!.user.role }); setMenuAnchor(null); }}>
           <ListItemIcon><EditIcon fontSize="small" /></ListItemIcon>
           <ListItemText>Rol Değiştir</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => { setProductAccessDialog(menuAnchor!.user); setSelectedProductIds([]); setMenuAnchor(null); }}>
+          <ListItemIcon><FolderOpenIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>Ürün Erişimi</ListItemText>
         </MenuItem>
         <MenuItem onClick={() => { statusMutation.mutate({ id: menuAnchor!.user.id, isActive: !menuAnchor!.user.isActive }); setMenuAnchor(null); }}>
           <ListItemIcon>{menuAnchor?.user.isActive ? <BlockIcon fontSize="small" /> : <CheckCircleIcon fontSize="small" />}</ListItemIcon>
@@ -449,7 +505,7 @@ export default function UsersRolesPage() {
             onChange={e => setCuForm(f => ({ ...f, email: e.target.value }))} />
           <FormControl fullWidth>
             <InputLabel>Rol</InputLabel>
-            <Select value={cuForm.role} label="Rol" onChange={e => setCuForm(f => ({ ...f, role: e.target.value }))}>
+            <Select value={cuForm.customerRole} label="Rol" onChange={e => setCuForm(f => ({ ...f, customerRole: e.target.value }))}>
               {CUSTOMER_ROLES.map(r => <MenuItem key={r} value={r}>{CUSTOMER_ROLE_LABELS[r]}</MenuItem>)}
             </Select>
           </FormControl>
@@ -465,6 +521,51 @@ export default function UsersRolesPage() {
           </Button>
         </Box>
       </Drawer>
+      {/* ── Ürün Erişimi Dialog ── */}
+      <Dialog open={!!productAccessDialog} onClose={() => setProductAccessDialog(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Ürün Erişimi — {productAccessDialog?.name}</DialogTitle>
+        <DialogContent>
+          {paLoading ? (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 1 }}>
+              <Skeleton height={32} /><Skeleton height={32} /><Skeleton height={32} />
+            </Box>
+          ) : allProducts.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>Ürün bulunamadı.</Typography>
+          ) : (
+            <FormGroup sx={{ mt: 1 }}>
+              {allProducts.map(p => (
+                <FormControlLabel
+                  key={p.id}
+                  control={
+                    <Checkbox
+                      checked={selectedProductIds.includes(p.id)}
+                      onChange={(e) => {
+                        setSelectedProductIds(prev =>
+                          e.target.checked ? [...prev, p.id] : prev.filter(id => id !== p.id)
+                        );
+                      }}
+                    />
+                  }
+                  label={p.name}
+                />
+              ))}
+            </FormGroup>
+          )}
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+            ADMIN rolü tüm ürünlere erişebilir (filtre uygulanmaz).
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setProductAccessDialog(null)}>İptal</Button>
+          <Button
+            variant="contained"
+            disabled={productAccessMutation.isPending}
+            onClick={() => productAccessMutation.mutate({ userId: productAccessDialog!.id, productIds: selectedProductIds })}
+          >
+            Kaydet
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

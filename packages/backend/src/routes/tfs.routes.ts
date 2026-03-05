@@ -738,5 +738,95 @@ router.post('/refresh-prep-release', async (req, res, next) => {
   }
 });
 
+// ── J-02: GET /api/tfs/git-refs?productId=&repoName= ──────────────────────────
+// Returns branch + tag list for a repository. Used in CPM form gitSyncRef picker.
+router.get('/git-refs', async (req, res, next) => {
+  try {
+    const { productId, repoName } = req.query as Record<string, string>;
+    if (!repoName) throw new AppError(400, 'repoName zorunludur');
+    const creds = await resolveCredentials(productId);
+    const repo = encodeURIComponent(repoName);
+
+    const [branchRes, tagRes] = await Promise.all([
+      tfsGet(`git/repositories/${repo}/refs?filter=heads/`, creds),
+      tfsGet(`git/repositories/${repo}/refs?filter=tags/`, creds),
+    ]);
+
+    type GitRef = { name: string; objectId: string };
+    const branches: string[] = ((branchRes as { value?: GitRef[] }).value ?? []).map((r) =>
+      r.name.replace('refs/heads/', ''),
+    );
+    const tags: string[] = ((tagRes as { value?: GitRef[] }).value ?? []).map((r) =>
+      r.name.replace('refs/tags/', ''),
+    );
+
+    res.json({ data: { branches, tags } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── J-03: GET /api/tfs/compare?repoName=&source=&target= ─────────────────────
+// Returns ahead/behind commit counts between two branches (for DORA Codebase Divergence).
+router.get('/compare', async (req, res, next) => {
+  try {
+    const { productId, repoName, source, target } = req.query as Record<string, string>;
+    if (!repoName || !source || !target) throw new AppError(400, 'repoName, source ve target zorunludur');
+    const creds = await resolveCredentials(productId);
+    const repo = encodeURIComponent(repoName);
+
+    // Azure DevOps: get commits in source not in target (ahead), and vice versa
+    const [aheadRes, behindRes] = await Promise.all([
+      tfsGet(
+        `git/repositories/${repo}/commitsBatch?compareVersion.versionType=branch&compareVersion.version=${encodeURIComponent(target)}&baseVersion.versionType=branch&baseVersion.version=${encodeURIComponent(source)}&$top=1000`,
+        creds,
+      ),
+      tfsGet(
+        `git/repositories/${repo}/commitsBatch?compareVersion.versionType=branch&compareVersion.version=${encodeURIComponent(source)}&baseVersion.versionType=branch&baseVersion.version=${encodeURIComponent(target)}&$top=1000`,
+        creds,
+      ),
+    ]);
+
+    type CommitBatch = { count?: number; value?: unknown[] };
+    const ahead: number = (aheadRes as CommitBatch).count ?? ((aheadRes as CommitBatch).value?.length ?? 0);
+    const behind: number = (behindRes as CommitBatch).count ?? ((behindRes as CommitBatch).value?.length ?? 0);
+
+    res.json({ data: { source, target, ahead, behind } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── J-04: GET /api/tfs/builds?productId=&minTime= ────────────────────────────
+// Returns pipeline build result counts (succeeded/failed/cancelled) for DORA Pipeline Success.
+router.get('/builds', async (req, res, next) => {
+  try {
+    const { productId, minTime } = req.query as Record<string, string>;
+    const creds = await resolveCredentials(productId);
+
+    const minParam = minTime ? `&minTime=${encodeURIComponent(minTime)}` : '';
+    const data = await tfsGet(`build/builds?$top=1000${minParam}`, creds);
+
+    type Build = { result: string };
+    const builds: Build[] = (data as { value?: Build[] }).value ?? [];
+
+    let succeeded = 0;
+    let failed = 0;
+    let cancelled = 0;
+    let total = builds.length;
+
+    for (const b of builds) {
+      const r = (b.result ?? '').toLowerCase();
+      if (r === 'succeeded') succeeded++;
+      else if (r === 'failed' || r === 'partiallySucceeded') failed++;
+      else if (r === 'cancelled') cancelled++;
+    }
+
+    res.json({ data: { total, succeeded, failed, cancelled, successRate: total > 0 ? succeeded / total : null } });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;
 

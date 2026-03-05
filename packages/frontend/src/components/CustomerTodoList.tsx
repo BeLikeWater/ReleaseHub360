@@ -17,6 +17,7 @@ import {
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/api/client';
+import { useAuthStore } from '@/store/authStore';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -84,6 +85,8 @@ interface Props {
 }
 
 export default function CustomerTodoList({ customerId, versionId, versionName }: Props) {
+  const user = useAuthStore((s) => s.user);
+  const canEdit = user?.role === 'CUSTOMER_ADMIN' || user?.role === 'APP_ADMIN' || user?.role === 'ADMIN';
   const queryClient = useQueryClient();
   const [noteInputs, setNoteInputs] = useState<Record<string, string>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -229,16 +232,21 @@ export default function CustomerTodoList({ customerId, versionId, versionName }:
                   >
                     <Stack direction="row" alignItems="flex-start" spacing={1}>
                       {/* Checkbox */}
-                      <Tooltip title={isCompleted ? 'Tamamlandı işaretini kaldır' : 'Tamamlandı işaretle'}>
-                        <Checkbox
-                          size="small"
-                          checked={isCompleted}
-                          disabled={isSaving}
-                          onChange={() => handleToggle(todo)}
-                          icon={<UncheckedIcon fontSize="small" />}
-                          checkedIcon={<CheckCircleIcon fontSize="small" color="success" />}
-                          sx={{ p: 0 }}
-                        />
+                      <Tooltip title={
+                        !canEdit ? 'Sadece yöneticiler bu listeyi güncelleyebilir' :
+                        isCompleted ? 'Tamamlandı işaretini kaldır' : 'Tamamlandı işaretle'
+                      }>
+                        <span>
+                          <Checkbox
+                            size="small"
+                            checked={isCompleted}
+                            disabled={isSaving || !canEdit}
+                            onChange={() => handleToggle(todo)}
+                            icon={<UncheckedIcon fontSize="small" />}
+                            checkedIcon={<CheckCircleIcon fontSize="small" color="success" />}
+                            sx={{ p: 0 }}
+                          />
+                        </span>
                       </Tooltip>
 
                       {/* Title + badges */}
@@ -297,13 +305,12 @@ export default function CustomerTodoList({ customerId, versionId, versionName }:
                         onBlur={() => handleNoteBlur(todo)}
                         variant="standard"
                         sx={{ mt: 0.25, '& input': { fontSize: 12 } }}
-                        disabled={isSaving}
+                        disabled={isSaving || !canEdit}
                       />
                     </Collapse>
                   </Paper>
                 );
-              })}
-            </Stack>
+              })}            </Stack>
           </Box>
         );
       })}

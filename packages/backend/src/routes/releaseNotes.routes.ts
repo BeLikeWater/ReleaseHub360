@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../lib/prisma';
-import { authenticateJWT } from '../middleware/auth.middleware';
+import { authenticateJWT, filterByUserProducts } from '../middleware/auth.middleware';
 import { AppError } from '../middleware/errorHandler.middleware';
 import { decrypt } from '../lib/encryption';
 
@@ -16,6 +16,7 @@ async function coveredWorkItemIds(productVersionId: string): Promise<Set<number>
 
 const router = Router();
 router.use(authenticateJWT);
+router.use(filterByUserProducts);
 
 const noteSchema = z.object({
   productVersionId: z.string().uuid(),
@@ -33,7 +34,10 @@ router.get('/', async (req, res, next) => {
     const { versionId } = req.query;
     if (!versionId) throw new AppError(400, 'versionId gerekli');
     const notes = await prisma.releaseNote.findMany({
-      where: { productVersionId: String(versionId) },
+      where: {
+        productVersionId: String(versionId),
+        ...(req.accessibleProductIds ? { productVersion: { productId: { in: req.accessibleProductIds } } } : {}),
+      },
       orderBy: [{ category: 'asc' }, { sortOrder: 'asc' }],
     });
     res.json({ data: notes });
@@ -177,6 +181,18 @@ router.get('/by-version/:versionId', async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+});
+
+// PATCH /api/release-notes/:id/mark-not-required — D2-02: "Bu WI için release note gerekmiyor" işareti
+router.patch('/:id/mark-not-required', async (req, res, next) => {
+  try {
+    const { isNotRequired = true } = z.object({ isNotRequired: z.boolean().optional() }).parse(req.body);
+    const note = await prisma.releaseNote.update({
+      where: { id: String(req.params.id) },
+      data: { isNotRequired },
+    });
+    res.json({ data: note });
+  } catch (err) { next(err); }
 });
 
 export default router;

@@ -254,6 +254,7 @@ Format: Her skill dosyasında `## Handoff Notu — Zorunlu Çıktı` bölümünd
 - Bu projeye özel: `grep -r "firebase" packages/frontend/src` → 0 sonuç = migration tamam
 - Kendin sor: "Kıdemli bir developer bunu onaylar mıydı?"
 - Test çalıştır, logları kontrol et, doğruluğu kanıtla
+- **Dosya yazımı doğrula:** Bir rol çıktısını dosyaya yazdıktan sonra `grep -n "anahtar_kelime" dosya.md` çalıştır — boş dönerse yazma başarısız demektir; `replace_string_in_file` ile tekrarla (→ L014)
 
 ### 5. Demand Elegance (Balanced)
 - Non-trivial değişikliklerde dur ve "daha zarif bir yol var mı?" diye sor
@@ -276,6 +277,31 @@ Format: Her skill dosyasında `## Handoff Notu — Zorunlu Çıktı` bölümünd
 3. **Track Progress:** Maddeleri tamamlandıkça işaretle
 4. **Explain Changes:** Her adımda üst düzey özet ver
 5. **Capture Lessons:** Düzeltmelerden sonra `tasks/lessons.md`'yi güncelle
+
+---
+
+## Backlog Workflow — Otonom Task Runner
+
+Kullanıcı `"backlog'dan devam et"` deyince:
+
+```
+1. tasks/backlog.md oku → ilk `- [ ]` (tamamlanmamış) task'ı bul
+2. Design dokümanını referans al: docs/DESIGN_DOCUMENT.md (ilgili bölüm)
+3. Task'ı implement et (schema/backend/frontend — task türüne göre)
+4. GREP_DOĞRULAMA komutunu çalıştır → sonuç beklentiyi karşılıyor mu?
+5. Karşılıyorsa: `- [ ]` → `- [x]` olarak işaretle
+6. npx tsc --noEmit → 0 hata olmalı
+7. Sonraki task'a geç (aynı oturumda birden fazla task eritilebilir)
+```
+
+### Backlog Kuralları
+
+- **Bağımlılık sırasını koru:** A bölümü (Schema) önce, sonra B (Middleware), sonra diğerleri
+- **Task ID referansı:** Her task `BölümHarfi-Numara` formatında (ör: A1-01, B2-03)
+- **Mevcut kodu bozma:** `gap-based` — sadece eksikleri kapat, çalışan kodu değiştirme
+- **Grep doğrulaması zorunlu:** Task'ın sonundaki grep komutu 0 olmayan sonuç dönmezse task tamamlanmamıştır
+- **Schema migration'ları:** `prisma migrate diff` + `docker exec` yöntemiyle güvenli uygula (lessons L003)
+- **Context kaybı önleme:** Her task tamamlandığında backlog'daki checkbox'ı işaretle — oturum kopsa bile ilerleme kaybolmaz
 
 ---
 
@@ -323,6 +349,7 @@ Bu dizinlerdeki dosyalar hiçbir karara referans alınmamalı, tasarım doküman
 - External servisler (n8n, MCP, TFS) backend üzerinden proxy edilir — frontend doğrudan çağırmaz
 - Prisma — raw SQL yasak
 - Secret'lar `.env`'de — kaynak kodda plain text yok
+- **Dosya yazma:** Her zaman `replace_string_in_file` / `create_file` tool — terminal `echo`, `cat >>`, heredoc (`<< 'EOF'`) asla kullanılmaz; VS Code bu komutları kırpar ve içerik sessizce kaybolur (→ L014)
 
 ---
 
@@ -335,6 +362,7 @@ Bu dizinlerdeki dosyalar hiçbir karara referans alınmamalı, tasarım doküman
 ROADMAP.md                  ← proje yol haritası
 docs/                       ← arşiv / referans dokümanlar
 tasks/
+  backlog.md                ← gap-based otonom task listesi (DESIGN_DOCUMENT.md kaynaklı)
   README.md                 ← pipeline dokümantasyonu
   lessons.md                ← öğrenilen dersler
   open/                     ← RM'nin açtığı görevler (TASK-XXX.md)

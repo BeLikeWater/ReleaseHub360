@@ -381,3 +381,12 @@ Tasarım tamamlandığında `designs/screens/{feature}.md` dosyasının **en son
 
 **RM Review bekleniyor:** evet
 ```
+
+---
+
+## ⚠️ Dosya Yazma Zorunlu Kuralı (L014)
+
+Tasarım dokümanını (`designs/screens/*.md`) yazarken / güncellerken:
+- **Kullan:** `replace_string_in_file` veya `create_file` tool
+- **Asla kullanma:** Terminal `echo`, `cat >>`, heredoc (`<< 'EOF'`) — VS Code bu komutları kırpar, içerik sessizce kaybolur, dosya güncellenmemiş görünür
+- **Doğrula:** Yazım sonrası `grep -n "anahtar_kelime" designs/screens/dosya.md` → boş dönerse yazma başarısız, tool ile tekrarla

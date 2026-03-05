@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import {
   Box, Typography, Button, TextField, Tabs, Tab, Chip, Paper,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
@@ -14,12 +14,27 @@ import {
   ChatBubbleOutline as CommentIcon,
   ViewList as ListIcon,
   ViewKanban as KanbanIcon,
+  OpenInNew as OpenInNewIcon,
+  Person as PersonIcon,
+  AttachFile as AttachFileIcon,
+  Info as InfoIcon,
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
+import { useNavigate } from 'react-router-dom';
 import apiClient from '@/api/client';
 import { useAuthStore } from '@/store/authStore';
+import {
+  DndContext,
+  DragEndEvent,
+  useDraggable,
+  useDroppable,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import { CSS } from '@dnd-kit/utilities';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -41,6 +56,8 @@ interface Issue {
   resolvedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  customerId: string | null;
+  productVersionId: string | null;
   customer: { id: string; name: string; code: string } | null;
   _count?: { comments: number; attachments: number };
 }
@@ -49,6 +66,7 @@ interface Comment {
   id: string;
   body: string;
   authorName: string;
+  authorSide: string; // 'ORG' | 'CUSTOMER'
   createdAt: string;
 }
 
@@ -97,6 +115,7 @@ function IssueDrawer({ issue, onClose }: { issue: Issue | null; onClose: () => v
   const qc = useQueryClient();
   const [newComment, setNewComment] = useState('');
   const currentUser = useAuthStore(s => s.user);
+  const navigate = useNavigate();
 
   const { data: comments = [], isLoading: loadingComments } = useQuery<Comment[]>({
     queryKey: ['issue-comments', issue?.id],
@@ -167,7 +186,28 @@ function IssueDrawer({ issue, onClose }: { issue: Issue | null; onClose: () => v
       {issue.customer && (
         <Box>
           <Typography variant="body2" color="text.secondary">Müşteri</Typography>
-          <Typography variant="body2">{issue.customer.name} ({issue.customer.code})</Typography>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <Typography variant="body2">{issue.customer.name} ({issue.customer.code})</Typography>
+            <IconButton size="small" title="Müşteri Dashboard'una git"
+              onClick={() => { onClose(); navigate(`/customer-dashboard/${issue.customerId}`); }}>
+              <OpenInNewIcon fontSize="inherit" />
+            </IconButton>
+          </Stack>
+        </Box>
+      )}
+
+      {issue.productVersionId && (
+        <Box>
+          <Typography variant="body2" color="text.secondary">İlgili Versiyon</Typography>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
+              {issue.productVersionId.slice(0, 8)}…
+            </Typography>
+            <Button size="small" variant="outlined" startIcon={<OpenInNewIcon />}
+              onClick={() => { onClose(); navigate('/release-calendar'); }}>
+              Takvimde Gör
+            </Button>
+          </Stack>
         </Box>
       )}
 
@@ -207,15 +247,34 @@ function IssueDrawer({ issue, onClose }: { issue: Issue | null; onClose: () => v
         {loadingComments && <LinearProgress sx={{ mb: 1 }} />}
 
         <Stack spacing={1.5} mb={2}>
-          {comments.map(c => (
-            <Paper key={c.id} variant="outlined" sx={{ p: 1.5 }}>
-              <Stack direction="row" justifyContent="space-between">
-                <Typography variant="caption" fontWeight={600}>{c.authorName}</Typography>
-                <Typography variant="caption" color="text.secondary">{fmtDate(c.createdAt)}</Typography>
-              </Stack>
-              <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: 'pre-wrap' }}>{c.body}</Typography>
-            </Paper>
-          ))}
+          {comments.map(c => {
+            const isOrg = c.authorSide !== 'CUSTOMER';
+            return (
+              <Box key={c.id} sx={{ display: 'flex', justifyContent: isOrg ? 'flex-end' : 'flex-start' }}>
+                {!isOrg && (
+                  <PersonIcon fontSize="small" sx={{ mt: 1, mr: 0.5, color: 'text.secondary' }} />
+                )}
+                <Box sx={{ maxWidth: '80%' }}>
+                  <Paper variant="outlined" sx={{
+                    p: 1.5,
+                    bgcolor: isOrg ? 'primary.50' : 'grey.100',
+                    borderColor: isOrg ? 'primary.200' : 'grey.300',
+                    borderRadius: isOrg ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
+                  }}>
+                    <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: 'pre-wrap' }}>{c.body}</Typography>
+                  </Paper>
+                  <Stack direction="row" justifyContent={isOrg ? 'flex-end' : 'flex-start'} spacing={0.5} mt={0.25}>
+                    <Typography variant="caption" color="text.secondary" fontWeight={600}>{c.authorName}</Typography>
+                    <Typography variant="caption" color="text.secondary">·</Typography>
+                    <Typography variant="caption" color="text.secondary">{fmtDate(c.createdAt)}</Typography>
+                  </Stack>
+                </Box>
+                {isOrg && (
+                  <PersonIcon fontSize="small" sx={{ mt: 1, ml: 0.5, color: 'primary.main' }} />
+                )}
+              </Box>
+            );
+          })}
           {comments.length === 0 && !loadingComments && (
             <Typography variant="caption" color="text.secondary">Henüz yorum yok.</Typography>
           )}
@@ -241,45 +300,108 @@ function IssueDrawer({ issue, onClose }: { issue: Issue | null; onClose: () => v
 
 // ── Kanban Board ──────────────────────────────────────────────────────────────
 
-function KanbanBoard({ issues, onSelectIssue }: { issues: Issue[]; onSelectIssue: (i: Issue) => void }) {
+function KanbanDraggableCard({ issue, onSelectIssue }: { issue: Issue; onSelectIssue: (i: Issue) => void }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: issue.id });
+  const style = {
+    transform: CSS.Translate.toString(transform),
+    opacity: isDragging ? 0.4 : 1,
+    cursor: 'grab',
+  };
+
+  return (
+    <Paper
+      ref={setNodeRef}
+      style={style}
+      {...listeners}
+      {...attributes}
+      variant="outlined"
+      sx={{ p: 1.5, '&:hover': { bgcolor: 'action.hover' } }}
+      onClick={(e) => { e.stopPropagation(); onSelectIssue(issue); }}
+    >
+      <Chip size="small" label={issue.priority} color={priorityColor(issue.priority)} variant="outlined" sx={{ mb: 0.5 }} />
+      <Typography variant="body2" fontWeight={600} sx={{ mb: 0.5, lineHeight: 1.3 }}>{issue.title}</Typography>
+      {issue.customer && (
+        <Typography variant="caption" color="text.secondary">{issue.customer.name}</Typography>
+      )}
+      <Stack direction="row" spacing={0.5} alignItems="center" mt={0.5}>
+        <CommentIcon sx={{ fontSize: 12 }} color="action" />
+        <Typography variant="caption" color="text.secondary">{issue._count?.comments ?? 0}</Typography>
+      </Stack>
+    </Paper>
+  );
+}
+
+function KanbanDroppableColumn({
+  status, issues, onSelectIssue,
+}: { status: IssueStatus; issues: Issue[]; onSelectIssue: (i: Issue) => void }) {
+  const { setNodeRef, isOver } = useDroppable({ id: status });
+
+  return (
+    <Box sx={{ minWidth: 220, flex: '0 0 220px' }}>
+      <Paper
+        variant="outlined"
+        sx={{ bgcolor: 'action.hover', p: 1, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}
+      >
+        <Chip size="small" label={STATUS_META[status].label} color={STATUS_META[status].color} />
+        <Typography variant="caption" color="text.secondary">({issues.length})</Typography>
+      </Paper>
+      <Stack
+        ref={setNodeRef}
+        spacing={1}
+        sx={{ minHeight: 80, borderRadius: 1, border: isOver ? '2px dashed' : '2px solid transparent', borderColor: isOver ? 'primary.main' : 'transparent', p: 0.5 }}
+      >
+        {issues.map(issue => (
+          <KanbanDraggableCard key={issue.id} issue={issue} onSelectIssue={onSelectIssue} />
+        ))}
+        {issues.length === 0 && (
+          <Paper variant="outlined" sx={{ p: 2, textAlign: 'center' }}>
+            <Typography variant="caption" color="text.secondary">Boş</Typography>
+          </Paper>
+        )}
+      </Stack>
+    </Box>
+  );
+}
+
+function KanbanBoard({ issues, onSelectIssue, onStatusChange }: {
+  issues: Issue[];
+  onSelectIssue: (i: Issue) => void;
+  onStatusChange: (issueId: string, newStatus: IssueStatus) => void;
+}) {
   const COLUMNS: IssueStatus[] = ['OPEN', 'ACKNOWLEDGED', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'];
   const grouped = COLUMNS.reduce<Record<IssueStatus, Issue[]>>((acc, s) => {
     acc[s] = issues.filter(i => i.status === s);
     return acc;
   }, {} as Record<IssueStatus, Issue[]>);
 
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over) return;
+    const issueId = String(active.id);
+    const newStatus = String(over.id) as IssueStatus;
+    if (!COLUMNS.includes(newStatus)) return;
+    const issue = issues.find(i => i.id === issueId);
+    if (!issue || issue.status === newStatus) return;
+    onStatusChange(issueId, newStatus);
+  };
+
   return (
-    <Box sx={{ display: 'flex', gap: 1.5, overflowX: 'auto', pb: 2 }}>
-      {COLUMNS.map(col => (
-        <Box key={col} sx={{ minWidth: 220, flex: '0 0 220px' }}>
-          <Paper variant="outlined" sx={{ bgcolor: 'action.hover', p: 1, mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Chip size="small" label={STATUS_META[col].label} color={STATUS_META[col].color} />
-            <Typography variant="caption" color="text.secondary">({grouped[col].length})</Typography>
-          </Paper>
-          <Stack spacing={1}>
-            {grouped[col].map(issue => (
-              <Paper key={issue.id} variant="outlined" sx={{ p: 1.5, cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
-                onClick={() => onSelectIssue(issue)}>
-                <Chip size="small" label={issue.priority} color={priorityColor(issue.priority)} variant="outlined" sx={{ mb: 0.5 }} />
-                <Typography variant="body2" fontWeight={600} sx={{ mb: 0.5, lineHeight: 1.3 }}>{issue.title}</Typography>
-                {issue.customer && (
-                  <Typography variant="caption" color="text.secondary">{issue.customer.name}</Typography>
-                )}
-                <Stack direction="row" spacing={0.5} alignItems="center" mt={0.5}>
-                  <CommentIcon sx={{ fontSize: 12 }} color="action" />
-                  <Typography variant="caption" color="text.secondary">{issue._count?.comments ?? 0}</Typography>
-                </Stack>
-              </Paper>
-            ))}
-            {grouped[col].length === 0 && (
-              <Paper variant="outlined" sx={{ p: 2, textAlign: 'center' }}>
-                <Typography variant="caption" color="text.secondary">Boş</Typography>
-              </Paper>
-            )}
-          </Stack>
-        </Box>
-      ))}
-    </Box>
+    <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+      <Box sx={{ display: 'flex', gap: 1.5, overflowX: 'auto', pb: 2 }}>
+        {COLUMNS.map(col => (
+          <KanbanDroppableColumn
+            key={col}
+            status={col}
+            issues={grouped[col]}
+            onSelectIssue={onSelectIssue}
+          />
+        ))}
+      </Box>
+    </DndContext>
   );
 }
 
@@ -299,8 +421,23 @@ export default function ReportIssuePage() {
   const [form, setForm] = useState(emptyForm);
   const [drawerIssue, setDrawerIssue] = useState<Issue | null>(null);
   const [snackbar, setSnackbar] = useState<string | null>(null);
+  // T-02: file upload state
+  const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isAdmin = currentUser?.role === 'ADMIN' || currentUser?.role === 'RELEASE_MANAGER';
+  const isCustomer = currentUser?.userType === 'CUSTOMER';
+
+  // T-01: Active transition check for customer users
+  const { data: activeTransitions } = useQuery<{ data: { id: string; status: string; environment: string }[] }>({
+    queryKey: ['active-transitions', currentUser?.customerId],
+    queryFn: () => apiClient.get('/customer-version-transitions', {
+      params: { customerId: currentUser?.customerId, status: 'PLANNED' },
+    }).then(r => r.data),
+    enabled: isCustomer && !!currentUser?.customerId && tab === 0,
+    staleTime: 60_000,
+  });
+  const hasActiveTransition = (activeTransitions?.data?.length ?? 0) > 0;
 
   // Tab 1: my issues
   const { data: myIssues = [], isLoading: loadingMine } = useQuery<Issue[]>({
@@ -321,23 +458,61 @@ export default function ReportIssuePage() {
   });
 
   const submitMutation = useMutation({
-    mutationFn: (data: typeof form) => apiClient.post('/transition-issues', {
-      title: data.title,
-      description: data.description,
-      priority: data.priority,
-      category: data.category,
-      module: data.module || null,
-      steps: data.steps || null,
-      reportedByName: currentUser?.name ?? 'Kullanıcı',
-      reportedById: currentUser?.id ?? null,
-    }),
-    onSuccess: () => {
+    mutationFn: async (data: typeof form) => {
+      // Adım 1: Sorun oluştur (kritik — başarısız olursa throw et, onError yakalar)
+      const res = await apiClient.post('/transition-issues', {
+        title: data.title,
+        description: data.description,
+        priority: data.priority,
+        category: data.category,
+        module: data.module || null,
+        steps: data.steps || null,
+        reportedByName: currentUser?.name ?? 'Kullanıcı',
+        reportedById: currentUser?.id ?? null,
+      });
+      const issueId: string = res.data.data?.id;
+
+      // BUG-021 FIX: Adım 2 — Dosya yükle (kritik değil — her dosyayı ayrı try/catch ile yükle)
+      // Hata olursa sorun yine oluşturulmuş sayılır; başarısız dosyalar toplanır, raporlanır.
+      const uploadErrors: string[] = [];
+      if (issueId && attachedFiles.length > 0) {
+        for (const file of attachedFiles) {
+          try {
+            const fd = new FormData();
+            fd.append('file', file);
+            await apiClient.post(`/transition-issues/${issueId}/attachments/upload`, fd, {
+              headers: { 'Content-Type': 'multipart/form-data' },
+            });
+          } catch {
+            uploadErrors.push(file.name);
+          }
+        }
+      }
+      return { res, uploadErrors };
+    },
+    onSuccess: ({ uploadErrors }) => {
       qc.invalidateQueries({ queryKey: ['transition-issues'] });
-      setSnackbar('Sorun başarıyla bildirildi. "Benim Sorunlarım" sekmesinden takip edebilirsiniz.');
+      if (uploadErrors.length > 0) {
+        setSnackbar(
+          `Sorun oluşturuldu, ancak ${uploadErrors.length} dosya yüklenemedi: ${uploadErrors.join(', ')}`,
+        );
+      } else {
+        setSnackbar('Sorun başarıyla bildirildi. "Benim Sorunlarım" sekmesinden takip edebilirsiniz.');
+      }
       setForm(emptyForm);
+      setAttachedFiles([]);
       setTab(1);
     },
     onError: () => setSnackbar('Sorun gönderilemedi, lütfen tekrar deneyin.'),
+  });
+
+  const kanbanStatusMutation = useMutation({
+    mutationFn: ({ issueId, newStatus }: { issueId: string; newStatus: IssueStatus }) =>
+      apiClient.patch(`/transition-issues/${issueId}`, { status: newStatus }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['transition-issues'] });
+    },
+    onError: () => setSnackbar('Durum güncellenemedi.'),
   });
 
   const field = (key: keyof typeof form) => ({
@@ -366,6 +541,13 @@ export default function ReportIssuePage() {
       {tab === 0 && (
         <Box sx={{ maxWidth: 700 }}>
           <Stack spacing={2.5}>
+            {/* T-01: Active transition warning */}
+            {isCustomer && hasActiveTransition && (
+              <Alert severity="info" icon={<InfoIcon />}>
+                <strong>Aktif geçiş planınız bulunuyor.</strong> Bildirdiğiniz sorunlar geçiş sürecinizle ilişkilendirilebilir. Devam edebilirsiniz.
+              </Alert>
+            )}
+
             <TextField label="Başlık *" fullWidth {...field('title')} />
 
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
@@ -390,6 +572,42 @@ export default function ReportIssuePage() {
 
             <TextField label="Açıklama *" fullWidth multiline rows={4} {...field('description')} />
             <TextField label="Sorunu Tekrar Etme Adımları" fullWidth multiline rows={3} {...field('steps')} />
+
+            {/* T-02: File attachments */}
+            <Box>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? []);
+                  setAttachedFiles(prev => [...prev, ...files]);
+                  if (fileInputRef.current) fileInputRef.current.value = '';
+                }}
+              />
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<AttachFileIcon />}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Dosya Ekle
+              </Button>
+              {attachedFiles.length > 0 && (
+                <Stack spacing={0.5} mt={1}>
+                  {attachedFiles.map((f, i) => (
+                    <Stack key={i} direction="row" alignItems="center" spacing={1}>
+                      <AttachFileIcon fontSize="small" color="action" />
+                      <Typography variant="caption" sx={{ flex: 1 }}>{f.name} ({(f.size / 1024).toFixed(1)} KB)</Typography>
+                      <IconButton size="small" onClick={() => setAttachedFiles(prev => prev.filter((_, idx) => idx !== i))}>
+                        <CloseIcon fontSize="small" />
+                      </IconButton>
+                    </Stack>
+                  ))}
+                </Stack>
+              )}
+            </Box>
 
             <Stack direction="row" justifyContent="flex-end">
               <Button variant="contained" startIcon={<SendIcon />}
@@ -486,7 +704,11 @@ export default function ReportIssuePage() {
           )}
 
           {!loadingAll && allIssues.length > 0 && viewMode === 'board' && (
-            <KanbanBoard issues={allIssues} onSelectIssue={setDrawerIssue} />
+            <KanbanBoard
+              issues={allIssues}
+              onSelectIssue={setDrawerIssue}
+              onStatusChange={(issueId, newStatus) => kanbanStatusMutation.mutate({ issueId, newStatus })}
+            />
           )}
 
           {!loadingAll && allIssues.length > 0 && viewMode === 'list' && (

@@ -901,3 +901,12 @@ if (enabled) {
 }
 // Main assertion: crash olmadı (dialog/drawer açıldı —  bu yeterli)
 ```
+
+---
+
+## ⚠️ Dosya Yazma Zorunlu Kuralı (L014)
+
+Bug ticket (`tasks/bugs/*.md`) veya herhangi bir markdown dosyasını yazarken:
+- **Kullan:** `replace_string_in_file` veya `create_file` tool
+- **Asla kullanma:** Terminal `echo`, `cat >>`, heredoc (`<< 'EOF'`) — VS Code bu komutları kırpar, içerik sessizce kaybolur
+- **Doğrula:** Yazım sonrası `grep -n "anahtar_kelime" dosya.md` → boş dönerse yazma başarısız, tool ile tekrarla

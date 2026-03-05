@@ -37,12 +37,16 @@ router.post('/', requireRole('ADMIN'), async (req, res, next) => {
     const { email, name, role, password } = z.object({
       email: z.string().email(),
       name: z.string().min(1),
-      role: z.string().default('DEVELOPER'),
+      role: z.enum(['ADMIN', 'RELEASE_MANAGER', 'PRODUCT_OWNER', 'DEVELOPER', 'DEVOPS_ENGINEER', 'QA_ENGINEER', 'VIEWER']).default('DEVELOPER'),
       password: z.string().min(6).default('changeme123'),
     }).parse(req.body);
 
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) throw new AppError(409, 'Bu e-posta zaten kayıtlı');
+
+    // B1-05: Müşteri kullanıcılarında da e-posta çakışması kontrolü
+    const existingCustomer = await prisma.customerUser.findFirst({ where: { email } });
+    if (existingCustomer) throw new AppError(409, 'Bu e-posta adresi zaten sistemde kayıtlı.');
 
     const passwordHash = await bcrypt.hash(password, 10);
     const user = await prisma.user.create({
@@ -56,9 +60,20 @@ router.post('/', requireRole('ADMIN'), async (req, res, next) => {
 // PATCH /api/users/:id/role
 router.patch('/:id/role', requireRole('ADMIN'), async (req, res, next) => {
   try {
-    const { role } = z.object({ role: z.string() }).parse(req.body);
+    const { role } = z.object({ role: z.enum(['ADMIN', 'RELEASE_MANAGER', 'PRODUCT_OWNER', 'DEVELOPER', 'DEVOPS_ENGINEER', 'QA_ENGINEER', 'VIEWER']) }).parse(req.body);
+    const targetId = String(req.params.id);
+
+    // B1-06: Son ADMIN koruması — rol ADMIN'den başka bir şeye değiştiriliyorsa
+    if (role !== 'ADMIN') {
+      const targetUser = await prisma.user.findUnique({ where: { id: targetId }, select: { role: true } });
+      if (targetUser?.role === 'ADMIN') {
+        const adminCount = await prisma.user.count({ where: { role: 'ADMIN', isActive: true } });
+        if (adminCount <= 1) throw new AppError(400, 'Son yönetici hesabı kaldırılamaz.');
+      }
+    }
+
     const user = await prisma.user.update({
-      where: { id: String(req.params.id) },
+      where: { id: targetId },
       data: { role },
       select: { id: true, email: true, name: true, role: true, isActive: true },
     });
@@ -70,8 +85,24 @@ router.patch('/:id/role', requireRole('ADMIN'), async (req, res, next) => {
 router.patch('/:id/status', requireRole('ADMIN'), async (req, res, next) => {
   try {
     const { isActive } = z.object({ isActive: z.boolean() }).parse(req.body);
+    const targetId = String(req.params.id);
+
+    // B2-06: Self-deactivation engeli
+    if (!isActive && req.user!.userId === targetId) {
+      throw new AppError(400, 'Kendi hesabınızı deaktive edemezsiniz.');
+    }
+
+    // B1-06: Son ADMIN koruması — deaktive ediliyorsa
+    if (!isActive) {
+      const targetUser = await prisma.user.findUnique({ where: { id: targetId }, select: { role: true } });
+      if (targetUser?.role === 'ADMIN') {
+        const adminCount = await prisma.user.count({ where: { role: 'ADMIN', isActive: true } });
+        if (adminCount <= 1) throw new AppError(400, 'Son yönetici hesabı kaldırılamaz.');
+      }
+    }
+
     const user = await prisma.user.update({
-      where: { id: String(req.params.id) },
+      where: { id: targetId },
       data: { isActive },
       select: { id: true, email: true, name: true, role: true, isActive: true },
     });
@@ -92,9 +123,58 @@ router.patch('/:id/password', requireRole('ADMIN'), async (req, res, next) => {
 // DELETE /api/users/:id
 router.delete('/:id', requireRole('ADMIN'), async (req, res, next) => {
   try {
-    if (req.user!.userId === String(req.params.id)) throw new AppError(400, 'Kendi hesabınızı silemezsiniz');
-    await prisma.user.delete({ where: { id: String(req.params.id) } });
+    const targetId = String(req.params.id);
+    // B2-06: Self-deletion engeli
+    if (req.user!.userId === targetId) throw new AppError(400, 'Kendi hesabınızı silemezsiniz.');
+
+    // B1-06: Son ADMIN koruması
+    const targetUser = await prisma.user.findUnique({ where: { id: targetId }, select: { role: true } });
+    if (targetUser?.role === 'ADMIN') {
+      const adminCount = await prisma.user.count({ where: { role: 'ADMIN', isActive: true } });
+      if (adminCount <= 1) throw new AppError(400, 'Son yönetici hesabı kaldırılamaz.');
+    }
+
+    await prisma.user.delete({ where: { id: targetId } });
     res.json({ data: { message: 'Kullanıcı silindi' } });
+  } catch (err) { next(err); }
+});
+
+// ── B2-04: Ürün Erişimi CRUD ──────────────────────────────────────────────────
+
+// GET /api/users/:id/product-access
+router.get('/:id/product-access', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const accesses = await prisma.userProductAccess.findMany({
+      where: { userId: String(req.params.id) },
+      select: { productId: true, product: { select: { id: true, name: true } } },
+    });
+    res.json({ data: accesses });
+  } catch (err) { next(err); }
+});
+
+// PUT /api/users/:id/product-access (toplu güncelle — productId array gönder)
+router.put('/:id/product-access', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const { productIds } = z.object({ productIds: z.array(z.string()) }).parse(req.body);
+    const userId = String(req.params.id);
+
+    // Kullanıcının varlığını kontrol et
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+    if (!user) throw new AppError(404, 'Kullanıcı bulunamadı');
+
+    // Transaction: mevcut erişimleri sil, yenilerini ekle
+    await prisma.$transaction([
+      prisma.userProductAccess.deleteMany({ where: { userId } }),
+      ...productIds.map((productId) =>
+        prisma.userProductAccess.create({ data: { userId, productId } })
+      ),
+    ]);
+
+    const updatedAccesses = await prisma.userProductAccess.findMany({
+      where: { userId },
+      select: { productId: true, product: { select: { id: true, name: true } } },
+    });
+    res.json({ data: updatedAccesses });
   } catch (err) { next(err); }
 });
 

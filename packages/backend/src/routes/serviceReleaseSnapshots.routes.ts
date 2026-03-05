@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../lib/prisma';
-import { authenticateJWT, requireRole } from '../middleware/auth.middleware';
+import { authenticateJWT, requireRole, filterByUserProducts } from '../middleware/auth.middleware';
 import { AppError } from '../middleware/errorHandler.middleware';
 import { decrypt } from '../lib/encryption';
 
 const router = Router();
 router.use(authenticateJWT);
+router.use(filterByUserProducts);
 
 // ─── Shared Azure helpers (inlined to avoid circular import) ─────────────────
 
@@ -401,6 +402,61 @@ router.post(
       );
 
       res.status(201).json({ data: { succeeded, skipped, failed, debug: { org: creds.org, project: creds.project, patLen: creds.pat?.length ?? 0 } } });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// POST /api/service-release-snapshots/cascade
+// F-01: Manually trigger ServiceVersion cascade — update currentReleaseId for all services in a productVersion
+router.post(
+  '/cascade',
+  requireRole('ADMIN', 'RELEASE_MANAGER'),
+  async (req, res, next) => {
+    try {
+      const cascadeSchema = z.object({
+        productVersionId: z.string().uuid(),
+        customerId: z.string().uuid().optional(),
+        environment: z.enum(['TEST', 'PRE_PROD', 'PROD']).default('PROD'),
+      });
+      const { productVersionId, environment } = cascadeSchema.parse(req.body);
+
+      // Find all ServiceVersion records for this productVersion
+      const serviceVersions = await prisma.serviceVersion.findMany({
+        where: { productVersionId },
+        select: { id: true, serviceId: true },
+      });
+
+      if (serviceVersions.length === 0) {
+        return res.status(200).json({ data: { updated: 0, message: 'Bu versiyon için servis kaydı bulunamadı' } });
+      }
+
+      let updated = 0;
+
+      await Promise.all(serviceVersions.map(async (sv) => {
+        // Find latest snapshot for this service + version
+        const latestSnapshot = await prisma.serviceReleaseSnapshot.findFirst({
+          where: { serviceId: sv.serviceId, productVersionId },
+          orderBy: { releasedAt: 'desc' },
+        });
+
+        const updateData: Record<string, unknown> = {
+          currentReleaseId: latestSnapshot?.id ?? null,
+          lastCheckedAt: new Date(),
+          isStale: false,
+        };
+
+        if (latestSnapshot?.releaseName) {
+          if (environment === 'PROD') updateData.prodVersion = latestSnapshot.releaseName;
+          if (environment === 'PRE_PROD') updateData.prepVersion = latestSnapshot.releaseName;
+        }
+
+        await prisma.serviceVersion.update({ where: { id: sv.id }, data: updateData });
+        updated++;
+      }));
+
+      res.json({ data: { updated, productVersionId, environment } });
     } catch (err) {
       next(err);
     }

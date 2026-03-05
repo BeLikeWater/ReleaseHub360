@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
 import { errorHandler } from './middleware/errorHandler.middleware';
 import authRoutes from './routes/auth.routes';
 import productsRoutes from './routes/products.routes';
@@ -32,11 +33,14 @@ import transitionIssuesRoutes from './routes/transitionIssues.routes';
 import customerUsersRoutes from './routes/customerUsers.routes';
 import metricsRoutes from './routes/metrics.routes';
 import customerDeploymentsRoutes from './routes/customerDeployments.routes';
+import serviceVersionsRoutes from './routes/serviceVersions.routes';
+import serviceVersionMatrixRoutes from './routes/serviceVersionMatrix.routes';
 
 const app = express();
 
 app.use(cors({ origin: process.env.CORS_ORIGIN ?? 'http://localhost:5173', credentials: true }));
 app.use(express.json());
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 // Health check
 app.get('/health', (_req, res) => {
@@ -75,6 +79,8 @@ app.use('/api/transition-issues', transitionIssuesRoutes);
 app.use('/api/customer-users', customerUsersRoutes);
 app.use('/api/metrics', metricsRoutes);
 app.use('/api/customer-deployments', customerDeploymentsRoutes);
+app.use('/api/service-versions', serviceVersionsRoutes);
+app.use('/api/service-version-matrix', serviceVersionMatrixRoutes);
 
 // Global error handler (must be last)
 app.use(errorHandler);

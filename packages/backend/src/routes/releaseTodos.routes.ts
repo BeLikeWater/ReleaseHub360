@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../lib/prisma';
-import { authenticateJWT } from '../middleware/auth.middleware';
+import { authenticateJWT, filterByUserProducts } from '../middleware/auth.middleware';
 import { AppError } from '../middleware/errorHandler.middleware';
 
 const router = Router();
 router.use(authenticateJWT);
+router.use(filterByUserProducts);
 
 const createSchema = z.object({
   productVersionId: z.string().uuid(),
@@ -33,8 +34,11 @@ router.get('/', async (req, res, next) => {
     const { versionId } = req.query;
     if (!versionId) throw new AppError(400, 'versionId gerekli');
     const todos = await prisma.releaseTodo.findMany({
-      where: { productVersionId: String(versionId) },
-      orderBy: [{ timing: 'asc' }, { priority: 'asc' }, { sortOrder: 'asc' }],
+      where: {
+        productVersionId: String(versionId),
+        ...(req.accessibleProductIds ? { productVersion: { productId: { in: req.accessibleProductIds } } } : {}),
+      },
+      orderBy: [{ phase: 'asc' }, { priority: 'asc' }, { sortOrder: 'asc' }],
     });
     res.json({ data: todos });
   } catch (err) {

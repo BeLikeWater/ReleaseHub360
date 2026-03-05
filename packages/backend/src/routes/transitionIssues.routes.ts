@@ -1,6 +1,22 @@
 import { Router, Request, Response } from 'express';
 import { PrismaClient, IssueStatus, IssuePriority } from '@prisma/client';
 import { authenticateJWT } from '../middleware/auth.middleware';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+
+const uploadDir = path.join(process.cwd(), 'uploads');
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, uploadDir),
+  filename: (_req, file, cb) => {
+    const unique = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+    cb(null, `${unique}-${safe}`);
+  },
+});
+const upload = multer({ storage, limits: { fileSize: 20 * 1024 * 1024 } });
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -88,6 +104,83 @@ router.get('/', async (req: Request, res: Response) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'İssue listesi alınamadı' });
+  }
+});
+
+// GET /api/transition-issues/stats
+// Issue sayılarını status ve priority bazında gruplandırır
+router.get('/stats', async (req: Request, res: Response) => {
+  try {
+    const { customerId, productVersionId, assignedTo } = req.query as Record<string, string>;
+    const where: Record<string, unknown> = {};
+    if (customerId) where.customerId = customerId;
+    if (productVersionId) where.productVersionId = productVersionId;
+    if (assignedTo) where.assignedTo = assignedTo;
+
+    const [byStatus, byPriority, byCategory, total, openCritical] = await Promise.all([
+      prisma.transitionIssue.groupBy({
+        by: ['status'],
+        where,
+        _count: { id: true },
+      }),
+      prisma.transitionIssue.groupBy({
+        by: ['priority'],
+        where,
+        _count: { id: true },
+      }),
+      prisma.transitionIssue.groupBy({
+        by: ['category'],
+        where,
+        _count: { id: true },
+      }),
+      prisma.transitionIssue.count({ where }),
+      prisma.transitionIssue.count({
+        where: { ...where, priority: 'CRITICAL', status: { in: ['OPEN', 'ACKNOWLEDGED', 'IN_PROGRESS'] } },
+      }),
+    ]);
+
+    res.json({
+      data: {
+        total,
+        openCritical,
+        byStatus: byStatus.map(r => ({ status: r.status, count: r._count.id })),
+        byPriority: byPriority.map(r => ({ priority: r.priority, count: r._count.id })),
+        byCategory: byCategory.map(r => ({ category: r.category ?? 'Diğer', count: r._count.id })),
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Stats alınamadı' });
+  }
+});
+
+// GET /api/transition-issues/summary
+// Dashboard widget için özet
+router.get('/summary', async (req: Request, res: Response) => {
+  try {
+    const { customerId } = req.query as Record<string, string>;
+    const where: Record<string, unknown> = {};
+    if (customerId) where.customerId = customerId;
+
+    const [open, inProgress, critical, resolvedToday] = await Promise.all([
+      prisma.transitionIssue.count({ where: { ...where, status: 'OPEN' } }),
+      prisma.transitionIssue.count({ where: { ...where, status: 'IN_PROGRESS' } }),
+      prisma.transitionIssue.count({
+        where: { ...where, priority: 'CRITICAL', status: { in: ['OPEN', 'ACKNOWLEDGED', 'IN_PROGRESS'] } },
+      }),
+      prisma.transitionIssue.count({
+        where: {
+          ...where,
+          status: 'RESOLVED',
+          resolvedAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+        },
+      }),
+    ]);
+
+    res.json({ data: { open, inProgress, critical, resolvedToday } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Summary alınamadı' });
   }
 });
 
@@ -260,6 +353,7 @@ router.post('/:id/comments', async (req: Request, res: Response) => {
         body,
         authorId: authorId ?? null,
         authorName,
+        authorSide: req.user?.userType === 'CUSTOMER' ? 'CUSTOMER' : 'ORG',
       },
     });
     res.status(201).json({ data: comment });
@@ -277,6 +371,44 @@ router.delete('/comments/:commentId', async (req: Request, res: Response) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Yorum silinemedi' });
+  }
+});
+
+// GET /api/transition-issues/:id/attachments
+router.get('/:id/attachments', async (req: Request, res: Response) => {
+  try {
+    const attachments = await prisma.issueAttachment.findMany({
+      where: { issueId: String(req.params.id) },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json({ data: attachments });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ekler getirilemedi' });
+  }
+});
+
+// POST /api/transition-issues/:id/attachments/upload
+router.post('/:id/attachments/upload', upload.single('file'), async (req: Request, res: Response) => {
+  try {
+    const issue = await prisma.transitionIssue.findUnique({ where: { id: String(req.params.id) } });
+    if (!issue) return res.status(404).json({ error: 'Issue bulunamadı' });
+    if (!req.file) return res.status(400).json({ error: 'Dosya yüklenmedi' });
+
+    const attachment = await prisma.issueAttachment.create({
+      data: {
+        issueId: issue.id,
+        filename: req.file.originalname,
+        mimeType: req.file.mimetype,
+        sizeBytes: req.file.size,
+        url: `/uploads/${req.file.filename}`,
+        uploadedBy: req.user?.name ?? null,
+      },
+    });
+    res.status(201).json({ data: attachment });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Dosya yüklenemedi' });
   }
 });
 

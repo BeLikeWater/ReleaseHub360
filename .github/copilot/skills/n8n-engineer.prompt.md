@@ -578,3 +578,12 @@ Test:
                                      ↓ hatalıysa return []
 ```
 ````
+
+---
+
+## ⚠️ Dosya Yazma Zorunlu Kuralı (L014)
+
+Workflow JSON veya herhangi bir dosyayı yazarken / güncellerken:
+- **Kullan:** `replace_string_in_file` veya `create_file` tool
+- **Asla kullanma:** Terminal `echo`, `cat >>`, heredoc (`<< 'EOF'`) — VS Code bu komutları kırpar, içerik sessizce kaybolur
+- **Doğrula:** Yazım sonrası `grep -n "anahtar_kelime" dosya` → boş dönerse yazma başarısız, tool ile tekrarla

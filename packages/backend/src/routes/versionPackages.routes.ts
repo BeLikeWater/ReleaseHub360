@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../lib/prisma';
-import { authenticateJWT, requireRole } from '../middleware/auth.middleware';
+import { authenticateJWT, requireRole, filterByUserProducts } from '../middleware/auth.middleware';
 import { AppError } from '../middleware/errorHandler.middleware';
 
 const router = Router();
 router.use(authenticateJWT);
+router.use(filterByUserProducts);
 
 // ── Validation schemas ────────────────────────────────────────────────────────
 
@@ -36,7 +37,10 @@ router.get('/', async (req, res, next) => {
   try {
     const { productVersionId } = req.query;
     const packages = await prisma.versionPackage.findMany({
-      where: productVersionId ? { productVersionId: String(productVersionId) } : undefined,
+      where: {
+        ...(productVersionId ? { productVersionId: String(productVersionId) } : {}),
+        ...(req.accessibleProductIds ? { productVersion: { productId: { in: req.accessibleProductIds } } } : {}),
+      },
       orderBy: { publishedAt: 'desc' },
       include: {
         productVersion: { select: { id: true, version: true, product: { select: { id: true, name: true } } } },
@@ -120,6 +124,40 @@ router.delete('/:id', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req, res, 
   try {
     await prisma.versionPackage.delete({ where: { id: String(req.params.id) } });
     res.status(204).send();
+  } catch (err) { next(err); }
+});
+
+// ── POST /api/version-packages/:versionId/generate-binary — E2-02 ────────────
+// Faz 1: Collect BINARY packages for the version and return a manifest for download
+// (actual ZIP bundling can be triggered later via S3/local storage)
+router.post('/:versionId/generate-binary', requireRole('ADMIN', 'RELEASE_MANAGER', 'CUSTOMER_ADMIN'), async (req, res, next) => {
+  try {
+    const { versionId } = req.params;
+
+    const binaryPackages = await prisma.versionPackage.findMany({
+      where: { productVersionId: String(versionId), packageType: 'BINARY' },
+    });
+
+    if (binaryPackages.length === 0) {
+      throw new AppError(404, 'Bu versiyona ait BINARY paket bulunamadı');
+    }
+
+    // Phase 1: Return manifest with artifact URLs for client to download
+    const manifest = binaryPackages.map(pkg => ({
+      id: pkg.id,
+      name: pkg.name,
+      version: pkg.version,
+      artifactUrl: pkg.artifactUrl,
+      checksum: pkg.checksum,
+    }));
+
+    // Track downloads
+    await prisma.versionPackage.updateMany({
+      where: { productVersionId: String(versionId), packageType: 'BINARY' },
+      data: { downloadCount: { increment: 1 }, lastDownloadedAt: new Date() },
+    });
+
+    res.json({ data: manifest, message: `${binaryPackages.length} binary paket hazırlandı` });
   } catch (err) { next(err); }
 });
 

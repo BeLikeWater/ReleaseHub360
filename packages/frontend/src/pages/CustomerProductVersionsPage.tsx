@@ -4,19 +4,17 @@ import {
   Button, Alert, Paper, Divider, Drawer,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
   Select, MenuItem, FormControl, InputLabel,
-  Table, TableBody, TableCell, TableHead, TableRow, TableContainer,
+  Table, TableBody, TableCell, TableHead, TableRow,
   Snackbar, Accordion, AccordionSummary, AccordionDetails, List, ListItem, ListItemText,
-  IconButton, Tooltip,
+  Tooltip,
 } from '@mui/material';
 import {
   ArrowBack as ArrowBackIcon,
   ArticleOutlined as ArticleIcon,
-  CalendarMonth as CalendarIcon,
   ChecklistRtl as ChecklistIcon,
   BugReport as BugReportIcon,
   ExpandMore as ExpandMoreIcon,
   Inventory2Outlined as PackageIcon,
-  Download as DownloadIcon,
   OpenInNew as OpenInNewIcon,
   ChangeHistory as ChangeHistoryIcon,
 } from '@mui/icons-material';
@@ -153,120 +151,6 @@ const STATUS_CONFIG: Record<VersionStatus, {
   older:   { label: 'GEÇMİŞ',    chipColor: 'default',  borderColor: 'divider',      bgSx: { opacity: 0.75 } },
 };
 
-// ── Environments for Transition Dialog ───────────────────────────────────────
-
-const ENVIRONMENTS = [
-  { key: 'TEST',     label: 'Test' },
-  { key: 'PRE_PROD', label: 'Pre-Prod' },
-  { key: 'PROD',     label: 'Production' },
-] as const;
-
-// ── Transition Plan Dialog ───────────────────────────────────────────────────
-
-function TransitionPlanDialog({
-  open, onClose, toVersionId, versionName, productName, customerId, existingTransitions,
-}: {
-  open: boolean;
-  onClose: () => void;
-  toVersionId: string;
-  versionName: string;
-  productName: string;
-  customerId: string;
-  existingTransitions: CustomerVersionTransition[];
-}) {
-  const queryClient = useQueryClient();
-  const [dates, setDates] = useState<Record<string, { planned: string; actual: string }>>(() => {
-    const init: Record<string, { planned: string; actual: string }> = {};
-    ENVIRONMENTS.forEach(({ key }) => {
-      const ex = existingTransitions.find((t) => t.toVersionId === toVersionId && t.environment === key);
-      init[key] = { planned: ex?.plannedDate?.slice(0, 10) ?? '', actual: ex?.actualDate?.slice(0, 10) ?? '' };
-    });
-    return init;
-  });
-
-  const saveMutation = useMutation({
-    mutationFn: async () => {
-      const promises = ENVIRONMENTS.map(async ({ key }) => {
-        const ex = existingTransitions.find((t) => t.toVersionId === toVersionId && t.environment === key);
-        const payload = {
-          customerId,
-          toVersionId,
-          environment: key,
-          plannedDate: dates[key].planned ? new Date(dates[key].planned).toISOString() : null,
-          actualDate: dates[key].actual ? new Date(dates[key].actual).toISOString() : null,
-        };
-        if (ex) {
-          return api.patch(`/customer-version-transitions/${ex.id}`, payload);
-        } else if (dates[key].planned || dates[key].actual) {
-          return api.post('/customer-version-transitions', payload);
-        }
-      });
-      await Promise.all(promises);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['customer-transitions'] });
-      onClose();
-    },
-  });
-
-  return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>📅 Geçiş Planı — {productName} {versionName}</DialogTitle>
-      <DialogContent>
-        <Typography variant="body2" color="text.secondary" mb={2}>
-          Her ortam için planlanan ve gerçekleşen tarihleri girin.
-          Production gerçekleşen tarih kaydedildiğinde müşterinin mevcut versiyonu otomatik güncellenir.
-        </Typography>
-        <TableContainer component={Paper} variant="outlined">
-          <Table size="small">
-            <TableHead>
-              <TableRow sx={{ bgcolor: 'action.hover' }}>
-                <TableCell sx={{ fontWeight: 700 }}>Ortam</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Planlanan Tarih</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>Gerçekleşen Tarih</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {ENVIRONMENTS.map(({ key, label }) => (
-                <TableRow key={key}>
-                  <TableCell><Chip label={label} size="small" /></TableCell>
-                  <TableCell>
-                    <TextField
-                      type="date"
-                      size="small"
-                      value={dates[key].planned}
-                      onChange={(e) => setDates((p) => ({ ...p, [key]: { ...p[key], planned: e.target.value } }))}
-                      slotProps={{ inputLabel: { shrink: true } }}
-                      sx={{ width: 150 }}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <TextField
-                      type="date"
-                      size="small"
-                      value={dates[key].actual}
-                      onChange={(e) => setDates((p) => ({ ...p, [key]: { ...p[key], actual: e.target.value } }))}
-                      slotProps={{ inputLabel: { shrink: true } }}
-                      sx={{ width: 150 }}
-                    />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-        {saveMutation.isError && <Alert severity="error" sx={{ mt: 1.5 }}>Kayıt sırasında hata oluştu.</Alert>}
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose} disabled={saveMutation.isPending}>İptal</Button>
-        <Button variant="contained" disabled={saveMutation.isPending} onClick={() => saveMutation.mutate()}>
-          {saveMutation.isPending ? 'Kaydediliyor...' : 'Kaydet'}
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-}
-
 // ── Version Card ──────────────────────────────────────────────────────────────
 
 // ── Version Services Section (lazy-loaded when accordion opens) ──────────────
@@ -332,25 +216,105 @@ const PACKAGE_TYPE_ICONS: Record<string, string> = {
   GIT_ARCHIVE:  '📂',
 };
 
-function VersionPackagesSection({ versionId }: { versionId: string }) {
+// E2-01: Artifact action button resolver based on CPM.artifactType and package type
+function ArtifactActionButton({ pkg, cpmArtifactType, customerId, productVersionId, navigate }: {
+  pkg: VersionPackage;
+  cpmArtifactType?: string | null;
+  customerId?: string;
+  productVersionId?: string;
+  navigate: (path: string) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+
+  const doDownload = async () => {
+    setLoading(true);
+    try {
+      const res = await api.post<{ data: { artifactUrl: string } }>(`/version-packages/${pkg.id}/download`);
+      const url = res.data.data.artifactUrl ?? pkg.artifactUrl ?? pkg.helmRepoUrl;
+      if (url) window.open(url, '_blank', 'noopener');
+    } catch {
+      const fallback = pkg.artifactUrl ?? pkg.helmRepoUrl;
+      if (fallback) window.open(fallback, '_blank', 'noopener');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const doTriggerDeploy = async () => {
+    setLoading(true);
+    try {
+      await api.post('/customer-deployments/trigger', {
+        customerId,
+        productVersionId,
+        environment: 'default',
+        notes: `Triggered from Customer Portal for package: ${pkg.name}`,
+      });
+    } catch {
+      // ignore — already logged server side
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (pkg.packageType === 'HELM_CHART') {
+    return (
+      <Tooltip title={pkg.helmRepoUrl ?? pkg.artifactUrl ?? 'HelmChart'}>
+        <Button size="small" variant="outlined" color="primary" startIcon={<OpenInNewIcon fontSize="small" />}
+          onClick={() => { const u = pkg.helmRepoUrl ?? pkg.artifactUrl; if (u) window.open(u, '_blank', 'noopener'); }}>
+          HelmChart İndir
+        </Button>
+      </Tooltip>
+    );
+  }
+
+  if (pkg.packageType === 'BINARY') {
+    return (
+      <Button size="small" variant="outlined" color="primary" disabled={loading}
+        onClick={doDownload}>
+        {loading ? <CircularProgress size={14} sx={{ mr: 1 }} /> : null} Paket İndir
+      </Button>
+    );
+  }
+
+  if (cpmArtifactType === 'DOCKER') {
+    return (
+      <Button size="small" variant="contained" color="warning" disabled={loading}
+        onClick={doTriggerDeploy}>
+        {loading ? <CircularProgress size={14} sx={{ mr: 1 }} /> : null} Güncelleme Onayla
+      </Button>
+    );
+  }
+
+  if (cpmArtifactType === 'GIT_SYNC') {
+    return (
+      <Button size="small" variant="outlined" color="secondary"
+        onClick={() => navigate('/code-sync')}>
+        Code Sync&apos;e Git
+      </Button>
+    );
+  }
+
+  // SaaS or unknown → request update
+  return (
+    <Button size="small" variant="outlined" color="info"
+      onClick={doTriggerDeploy} disabled={loading}>
+      {loading ? <CircularProgress size={14} sx={{ mr: 1 }} /> : null} Güncelleme Talep Et
+    </Button>
+  );
+}
+
+function VersionPackagesSection({ versionId, cpmArtifactType, customerId }: {
+  versionId: string;
+  cpmArtifactType?: string | null;
+  customerId?: string;
+}) {
+  const navigate = useNavigate();
   const { data, isLoading, isError } = useQuery<{ data: VersionPackage[] }>({
     queryKey: ['version-packages', versionId],
     queryFn: () => api.get(`/version-packages?productVersionId=${versionId}`).then((r) => r.data),
   });
 
   const packages = data?.data ?? [];
-
-  const handleDownload = async (pkg: VersionPackage) => {
-    try {
-      const res = await api.post<{ data: { artifactUrl: string } }>(`/version-packages/${pkg.id}/download`);
-      const url = res.data.data.artifactUrl ?? pkg.artifactUrl ?? pkg.helmRepoUrl;
-      if (url) window.open(url, '_blank', 'noopener');
-    } catch {
-      // silently ignore — user can still see the URL
-      const fallback = pkg.artifactUrl ?? pkg.helmRepoUrl;
-      if (fallback) window.open(fallback, '_blank', 'noopener');
-    }
-  };
 
   if (isLoading) return <CircularProgress size={20} sx={{ m: 2 }} />;
   if (isError) return <Typography variant="caption" color="error" sx={{ p: 2 }}>Yüklenemedi.</Typography>;
@@ -364,7 +328,7 @@ function VersionPackagesSection({ versionId }: { versionId: string }) {
           <TableCell sx={{ fontWeight: 700 }}>Paket</TableCell>
           <TableCell sx={{ fontWeight: 700 }}>Tür</TableCell>
           <TableCell sx={{ fontWeight: 700 }}>Versiyon</TableCell>
-          <TableCell sx={{ fontWeight: 700, textAlign: 'center' }}>İndir</TableCell>
+          <TableCell sx={{ fontWeight: 700 }}>Aksiyon</TableCell>
         </TableRow>
       </TableHead>
       <TableBody>
@@ -392,20 +356,15 @@ function VersionPackagesSection({ versionId }: { versionId: string }) {
             <TableCell>
               <Typography variant="body2" fontFamily="monospace">{pkg.version}</Typography>
             </TableCell>
-            <TableCell sx={{ textAlign: 'center' }}>
-              {(pkg.artifactUrl || pkg.helmRepoUrl) ? (
-                <Tooltip title={`${pkg.downloadCount ?? 0} indirme`}>
-                  <IconButton
-                    size="small"
-                    color="primary"
-                    onClick={() => handleDownload(pkg)}
-                  >
-                    {pkg.packageType === 'HELM_CHART' ? <OpenInNewIcon fontSize="small" /> : <DownloadIcon fontSize="small" />}
-                  </IconButton>
-                </Tooltip>
-              ) : (
-                <Typography variant="caption" color="text.disabled">—</Typography>
-              )}
+            <TableCell>
+              {/* E2-01: Artifact-type-specific action button */}
+              <ArtifactActionButton
+                pkg={pkg}
+                cpmArtifactType={cpmArtifactType}
+                customerId={customerId}
+                productVersionId={versionId}
+                navigate={navigate}
+              />
             </TableCell>
           </TableRow>
         ))}
@@ -482,8 +441,9 @@ function VersionCard({
   status,
   productName,
   transitions,
+  cpmArtifactType,
+  customerId,
   onOpenReleaseNotes,
-  onOpenTransitionPlan,
   onOpenTodos,
   onOpenIssue,
 }: {
@@ -491,8 +451,9 @@ function VersionCard({
   status: VersionStatus;
   productName: string;
   transitions: CustomerVersionTransition[];
+  cpmArtifactType?: string | null;
+  customerId?: string;
   onOpenReleaseNotes: (versionId: string, versionName: string, productName: string) => void;
-  onOpenTransitionPlan: (toVersionId: string, versionName: string, productName: string) => void;
   onOpenTodos: (versionId: string, versionName: string) => void;
   onOpenIssue: (productVersionId: string, versionName: string) => void;
 }) {
@@ -570,17 +531,7 @@ function VersionCard({
             Release Notları
           </Button>
 
-          {status === 'newer' && (
-            <Button
-              size="small"
-              variant="contained"
-              color="warning"
-              startIcon={<CalendarIcon />}
-              onClick={() => onOpenTransitionPlan(version.id, version.version, productName)}
-            >
-              Geçiş Planı
-            </Button>
-          )}
+
 
           {status !== 'older' && (
             <Button
@@ -639,6 +590,8 @@ function VersionCard({
           >
             Değişiklikler
           </Button>
+
+
         </Stack>
       </Box>
 
@@ -671,7 +624,11 @@ function VersionCard({
           <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ px: 2, pt: 1.5, display: 'block' }}>
             📦 İndirilebilir Paketler
           </Typography>
-          <VersionPackagesSection versionId={version.id} />
+          <VersionPackagesSection
+            versionId={version.id}
+            cpmArtifactType={cpmArtifactType}
+            customerId={customerId}
+          />
         </Box>
       )}
 
@@ -690,6 +647,7 @@ function VersionCard({
           <VersionChangesSection versionId={version.id} />
         </Box>
       )}
+
     </Paper>
   );
 }
@@ -707,10 +665,6 @@ export default function CustomerProductVersionsPage() {
   const [releaseNoteDrawer, setReleaseNoteDrawer] = useState<{
     open: boolean; versionId: string; versionName: string; productName: string;
   }>({ open: false, versionId: '', versionName: '', productName: '' });
-
-  const [transitionDlg, setTransitionDlg] = useState<{
-    open: boolean; toVersionId: string; versionName: string; productName: string;
-  }>({ open: false, toVersionId: '', versionName: '', productName: '' });
 
   const [todoDrawer, setTodoDrawer] = useState<{
     open: boolean; versionId: string; versionName: string;
@@ -731,7 +685,7 @@ export default function CustomerProductVersionsPage() {
   });
 
   const { data: cpmData } = useQuery<{
-    data: { id: string; productVersionId: string; productVersion: { id: string; version: string; product: { id: string; name: string } } }[];
+    data: { id: string; productVersionId: string; artifactType?: string | null; productVersion: { id: string; version: string; product: { id: string; name: string } } }[];
   }>({
     queryKey: ['customer-product-mappings', customerId],
     queryFn: () => api.get('/customer-product-mappings', { params: { customerId } }).then((r) => r.data),
@@ -763,7 +717,10 @@ export default function CustomerProductVersionsPage() {
   });
 
   // ── Derived ───────────────────────────────────────────────────────────────
-  const sortedVersions: ProductVersion[] = (versionsData?.data ?? []).slice().sort((a, b) => {
+  const sortedVersions: ProductVersion[] = (versionsData?.data ?? [])
+    .filter((v) => v.phase === 'PRODUCTION')
+    .slice()
+    .sort((a, b) => {
     const da = versionDate(a) ?? '';
     const db = versionDate(b) ?? '';
     return db.localeCompare(da);
@@ -782,9 +739,6 @@ export default function CustomerProductVersionsPage() {
   // ── Handlers ──────────────────────────────────────────────────────────────
   const handleOpenReleaseNotes = (versionId: string, versionName: string, pName: string) =>
     setReleaseNoteDrawer({ open: true, versionId, versionName, productName: pName });
-
-  const handleOpenTransitionPlan = (toVersionId: string, versionName: string, pName: string) =>
-    setTransitionDlg({ open: true, toVersionId, versionName, productName: pName });
 
   const handleOpenTodos = (versionId: string, versionName: string) =>
     setTodoDrawer({ open: true, versionId, versionName });
@@ -882,8 +836,9 @@ export default function CustomerProductVersionsPage() {
                 status={status}
                 productName={productName}
                 transitions={transitions}
+                cpmArtifactType={mapping?.artifactType}
+                customerId={customerId}
                 onOpenReleaseNotes={handleOpenReleaseNotes}
-                onOpenTransitionPlan={handleOpenTransitionPlan}
                 onOpenTodos={handleOpenTodos}
                 onOpenIssue={handleOpenIssue}
               />
@@ -976,19 +931,6 @@ export default function CustomerProductVersionsPage() {
           />
         )}
       </Drawer>
-
-      {/* Transition Plan Dialog */}
-      {transitionDlg.open && (
-        <TransitionPlanDialog
-          open={transitionDlg.open}
-          onClose={() => setTransitionDlg((p) => ({ ...p, open: false }))}
-          toVersionId={transitionDlg.toVersionId}
-          versionName={transitionDlg.versionName}
-          productName={transitionDlg.productName}
-          customerId={customerId!}
-          existingTransitions={transitions}
-        />
-      )}
 
       {/* Issue Report Dialog */}
       <Dialog

@@ -52,19 +52,19 @@ const navGroups: NavGroup[] = [
   },
   {
     title: 'Değişiklik & Takip',
-    roles: ['ADMIN', 'RELEASE_MANAGER', 'DEVELOPER'],
+    roles: ['ADMIN', 'RELEASE_MANAGER', 'PRODUCT_OWNER', 'DEVELOPER', 'DEVOPS_ENGINEER', 'QA_ENGINEER'],
     items: [
       { label: 'Hotfix Merkezi', to: '/hotfix-merkezi', icon: <BugReportIcon /> },
       { label: 'Urgent Changes', to: '/urgent-changes', icon: <WarningIcon />, roles: ['ADMIN', 'RELEASE_MANAGER'] },
       { label: 'Change Tracking', to: '/change-tracking', icon: <TrackChangesIcon /> },
-      { label: 'Pipeline Status', to: '/pipeline-status', icon: <AccountTreeIcon /> },
-      { label: 'Code Sync', to: '/code-sync', icon: <SyncAltIcon />, roles: ['ADMIN', 'RELEASE_MANAGER'] },
+      { label: 'Pipeline Status', to: '/pipeline-status', icon: <AccountTreeIcon />, roles: ['ADMIN', 'RELEASE_MANAGER', 'DEVOPS_ENGINEER'] },
+      { label: 'Code Sync', to: '/code-sync', icon: <SyncAltIcon />, roles: ['ADMIN', 'RELEASE_MANAGER', 'DEVOPS_ENGINEER'] },
       { label: 'Workflow History', to: '/workflow-history', icon: <HistoryIcon /> },
     ],
   },
   {
     title: 'Müşteri',
-    roles: ['ADMIN', 'RELEASE_MANAGER'],
+    roles: ['ADMIN', 'RELEASE_MANAGER', 'PRODUCT_OWNER'],
     items: [
       { label: 'Customer Management', to: '/customer-management', icon: <PeopleIcon /> },
       { label: 'Customer Dashboard', to: '/customer-dashboard', icon: <AccountCircleIcon /> },
@@ -86,10 +86,7 @@ const customerNavGroups: NavGroup[] = [
   {
     title: 'Genel',
     items: [
-      { label: 'Dashboard', to: '/', icon: <DashboardIcon /> },
       { label: 'Customer Dashboard', to: '/customer-dashboard', icon: <AccountCircleIcon /> },
-      { label: 'Service Version Matrix', to: '/service-version-matrix', icon: <TableChartIcon /> },
-      { label: 'Report Issue', to: '/report-issue', icon: <FlagIcon /> },
     ],
   },
 ];

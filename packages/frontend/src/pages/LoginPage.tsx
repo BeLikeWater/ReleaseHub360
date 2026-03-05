@@ -21,11 +21,11 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
     try {
-      const endpoint = tab === 0 ? '/auth/login' : '/auth/customer-login';
+      const endpoint = '/auth/login'; // Birleşik endpoint: backend önce org, bulamazsa customer_users arar
       const res = await apiClient.post(endpoint, { email, password });
       const { user, accessToken, refreshToken } = res.data.data;
       login(user, accessToken, refreshToken);
-      navigate('/');
+      navigate(user.userType === 'CUSTOMER' ? '/customer-dashboard' : '/');
     } catch {
       setError('E-posta veya şifre hatalı.');
     } finally {

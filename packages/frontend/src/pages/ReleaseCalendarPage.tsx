@@ -22,7 +22,7 @@ import {
 } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import apiClient from '@/api/client';
-import { PHASE_META, NEXT_PHASE, computePhase } from '@/lib/versionPhase';
+import { PHASE_META, computePhase } from '@/lib/versionPhase';
 
 // ---------- Types ----------
 type Version = {
@@ -32,8 +32,8 @@ type Version = {
   isHotfix: boolean;
   description?: string | null;
   createdBy?: string | null;
-  masterStartDate?: string | null;
-  testDate?: string | null;
+  devStartDate?: string | null;
+  testStartDate?: string | null;
   preProdDate?: string | null;
   targetDate?: string | null;
   releaseDate?: string | null;
@@ -44,10 +44,9 @@ type Product = { id: string; name: string };
 
 // ---------- Constants ----------
 const MILESTONE_CONFIG = [
-  { key: 'masterStartDate', label: 'Dev',          color: 'info'    as const },
-  { key: 'testDate',        label: 'Test',         color: 'warning' as const },
-  { key: 'preProdDate',     label: 'Prep',         color: 'warning' as const },
-  { key: 'targetDate',      label: 'Hedef Yayın',  color: 'error'   as const },
+  { key: 'devStartDate',  label: 'Geliştirme',      overdueLabel: 'Geliştirme başlamalıydı', color: 'info'    as const },
+  { key: 'testStartDate', label: 'Test',             overdueLabel: 'Test gecikmesi',          color: 'warning' as const },
+  { key: 'targetDate',    label: 'Yayınlama',        overdueLabel: 'Yayınlama gecikmiş',      color: 'error'   as const },
 ];
 
 // ---------- Helpers ----------
@@ -97,10 +96,9 @@ function isMilestoneOverdue(
 ): boolean {
   if (!dateVal) return false;
   const milestonePhaseMap: Record<string, string> = {
-    masterStartDate: 'DEVELOPMENT',
-    testDate: 'RC',
-    preProdDate: 'STAGING',
-    targetDate: 'PRODUCTION',
+    devStartDate:  'DEVELOPMENT',
+    testStartDate: 'RC',
+    targetDate:    'PRODUCTION',
   };
   const requiredPhase = milestonePhaseMap[milestoneKey];
   if (!requiredPhase) return false;
@@ -159,12 +157,23 @@ function VersionDialog({
   const qc = useQueryClient();
   const [productId, setProductId] = useState('');
   const [version, setVersion] = useState('');
+  const [versionError, setVersionError] = useState('');
   const [isHotfix, setIsHotfix] = useState(false);
   const [description, setDescription] = useState('');
   const [masterStartDate, setMasterStartDate] = useState('');
   const [testDate, setTestDate] = useState('');
-  const [preProdDate, setPreProdDate] = useState('');
   const [targetDate, setTargetDate] = useState('');
+
+  const SEMVER_RE = /^v?\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$/;
+
+  const handleVersionChange = (val: string) => {
+    setVersion(val);
+    if (val && !SEMVER_RE.test(val)) {
+      setVersionError('Geçerli bir semver formatı girin (örn: 1.2.3 veya v1.2.3-rc1)');
+    } else {
+      setVersionError('');
+    }
+  };
 
   const create = useMutation({
     mutationFn: () => apiClient.post('/product-versions', {
@@ -172,14 +181,13 @@ function VersionDialog({
       description: description || undefined,
       masterStartDate: parseNullable(masterStartDate),
       testDate: parseNullable(testDate),
-      preProdDate: parseNullable(preProdDate),
       targetDate: parseNullable(targetDate),
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['versions-calendar'] });
       onClose();
       setProductId(''); setVersion(''); setIsHotfix(false); setDescription('');
-      setMasterStartDate(''); setTestDate(''); setPreProdDate(''); setTargetDate('');
+      setMasterStartDate(''); setTestDate(''); setTargetDate('');
     },
   });
 
@@ -193,20 +201,23 @@ function VersionDialog({
             {products.map((p) => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
           </Select>
         </FormControl>
-        <TextField label="Versiyon" required placeholder="v3.3.0" value={version} onChange={(e) => setVersion(e.target.value)} />
+        <TextField
+          label="Versiyon" required placeholder="v3.3.0"
+          value={version} onChange={(e) => handleVersionChange(e.target.value)}
+          error={!!versionError} helperText={versionError}
+        />
         <TextField label="Açıklama" multiline rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
         <FormControlLabel control={<Checkbox checked={isHotfix} onChange={(e) => setIsHotfix(e.target.checked)} />} label="Hotfix" />
-        <Typography variant="caption" color="text.secondary" sx={{ mt: 1 }}>Milestone Planlama (opsiyonel)</Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ mt: 1 }}>Tarihler (opsiyonel)</Typography>
         <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
-          <TextField label="Dev Başlangıcı" type="date" size="small" value={masterStartDate} onChange={(e) => setMasterStartDate(e.target.value)} InputLabelProps={{ shrink: true }} />
-          <TextField label="Test Tarihi" type="date" size="small" value={testDate} onChange={(e) => setTestDate(e.target.value)} InputLabelProps={{ shrink: true }} />
-          <TextField label="Pre-Prod Tarihi" type="date" size="small" value={preProdDate} onChange={(e) => setPreProdDate(e.target.value)} InputLabelProps={{ shrink: true }} />
-          <TextField label="Hedef Yayın" type="date" size="small" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} InputLabelProps={{ shrink: true }} />
+          <TextField label="Geliştirme Başlangıcı" type="date" size="small" value={masterStartDate} onChange={(e) => setMasterStartDate(e.target.value)} InputLabelProps={{ shrink: true }} />
+          <TextField label="Teste Başlama" type="date" size="small" value={testDate} onChange={(e) => setTestDate(e.target.value)} InputLabelProps={{ shrink: true }} />
+          <TextField label="Yayınlama Tarihi" type="date" size="small" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} InputLabelProps={{ shrink: true }} />
         </Box>
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>İptal</Button>
-        <Button variant="contained" disabled={!productId || !version || create.isPending} onClick={() => create.mutate()}>
+        <Button variant="contained" disabled={!productId || !version || !!versionError || create.isPending} onClick={() => create.mutate()}>
           {create.isPending ? <CircularProgress size={18} /> : 'Oluştur'}
         </Button>
       </DialogActions>
@@ -217,18 +228,18 @@ function VersionDialog({
 // ---------- Edit Drawer ----------
 function EditDrawer({ version: v, onClose }: { version: Version | null; onClose: () => void }) {
   const qc = useQueryClient();
+  const [phase, setPhase] = useState('');
   const [masterStartDate, setMasterStartDate] = useState('');
   const [testDate, setTestDate] = useState('');
-  const [preProdDate, setPreProdDate] = useState('');
   const [targetDate, setTargetDate] = useState('');
   const [description, setDescription] = useState('');
 
   // sync when version changes
   useEffect(() => {
     if (v) {
-      setMasterStartDate(toDateInput(v.masterStartDate));
-      setTestDate(toDateInput(v.testDate));
-      setPreProdDate(toDateInput(v.preProdDate));
+      setPhase(v.phase);
+      setMasterStartDate(toDateInput(v.devStartDate));
+      setTestDate(toDateInput(v.testStartDate));
       setTargetDate(toDateInput(v.targetDate));
       setDescription(v.description ?? '');
     }
@@ -238,37 +249,16 @@ function EditDrawer({ version: v, onClose }: { version: Version | null; onClose:
     mutationFn: () => apiClient.put(`/product-versions/${v!.id}`, {
       productId: v!.product.id,
       version: v!.version,
+      phase,
       description: description || undefined,
       masterStartDate: parseNullable(masterStartDate),
       testDate: parseNullable(testDate),
-      preProdDate: parseNullable(preProdDate),
       targetDate: parseNullable(targetDate),
     }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['versions-calendar'] }); onClose(); },
   });
 
-  const advanceMut = useMutation({
-    mutationFn: () => apiClient.patch(`/product-versions/${v!.id}/advance-phase`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['versions-calendar'] }); onClose(); },
-  });
 
-  const [deprecateWarning, setDeprecateWarning] = useState<{ customers: Array<{ customerName: string }>; count: number } | null>(null);
-
-  const deprecateMut = useMutation({
-    mutationFn: (force: boolean) => apiClient.patch(`/product-versions/${v!.id}/deprecate${force ? '?force=true' : ''}`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['versions-calendar'] }); onClose(); setDeprecateWarning(null); },
-    onError: (err: unknown) => {
-      const resp = (err as { response?: { status?: number; data?: { error?: string; activeCustomers?: Array<{ customerName: string }>; count?: number } } })?.response;
-      if (resp?.status === 409 && resp.data?.error === 'ACTIVE_CUSTOMERS') {
-        setDeprecateWarning({ customers: resp.data.activeCustomers ?? [], count: resp.data.count ?? 0 });
-      }
-    },
-  });
-
-  const { label: phaseLabel, color: phaseColor } = (v ? PHASE_META[v.phase] : null) ?? PHASE_META['PLANNED'];
-  const nextPhase = v ? NEXT_PHASE[v.phase] : null;
-  const canAdvance = !!nextPhase;
-  const canDeprecate = v?.phase !== 'ARCHIVED';
 
   return (
     <Drawer anchor="right" open={Boolean(v)} onClose={onClose} PaperProps={{ sx: { width: 360, p: 3 } }}>
@@ -277,19 +267,31 @@ function EditDrawer({ version: v, onClose }: { version: Version | null; onClose:
           <Box>
             <Typography variant="h6" fontWeight={700}>{v.product.name} — {v.version}</Typography>
             <Box sx={{ display: 'flex', gap: 1, mt: 0.5 }}>
-              <Chip label={phaseLabel} color={phaseColor} size="small" />
+              <Chip label={PHASE_META[v.phase]?.label ?? v.phase} color={PHASE_META[v.phase]?.color ?? 'default'} size="small" />
               {v.isHotfix && <Chip label="HOTFIX" color="error" size="small" />}
             </Box>
           </Box>
 
           <Divider />
 
-          <Typography variant="subtitle2" fontWeight={700}>Milestone Tarihleri</Typography>
+          <FormControl size="small" fullWidth>
+            <InputLabel>Durum</InputLabel>
+            <Select label="Durum" value={phase} onChange={(e) => setPhase(e.target.value)}>
+              <MenuItem value="PLANNED">Henüz Başlanmadı</MenuItem>
+              <MenuItem value="DEVELOPMENT">Geliştirme</MenuItem>
+              <MenuItem value="RC">Test</MenuItem>
+              <MenuItem value="PRODUCTION">Yayında</MenuItem>
+              <MenuItem value="ARCHIVED">Arşiv</MenuItem>
+            </Select>
+          </FormControl>
 
-          <TextField label="🟢 Dev Başlangıcı" type="date" fullWidth size="small" value={masterStartDate} onChange={(e) => setMasterStartDate(e.target.value)} InputLabelProps={{ shrink: true }} />
-          <TextField label="🟡 Test Tarihi" type="date" fullWidth size="small" value={testDate} onChange={(e) => setTestDate(e.target.value)} InputLabelProps={{ shrink: true }} />
-          <TextField label="🟠 Pre-Prod Tarihi" type="date" fullWidth size="small" value={preProdDate} onChange={(e) => setPreProdDate(e.target.value)} InputLabelProps={{ shrink: true }} />
-          <TextField label="🔵 Hedef Yayın Tarihi" type="date" fullWidth size="small" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} InputLabelProps={{ shrink: true }} />
+          <Divider />
+
+          <Typography variant="subtitle2" fontWeight={700}>Tarihler</Typography>
+
+          <TextField label="🟢 Geliştirme Başlangıcı" type="date" fullWidth size="small" value={masterStartDate} onChange={(e) => setMasterStartDate(e.target.value)} InputLabelProps={{ shrink: true }} />
+          <TextField label="🟡 Teste Başlama" type="date" fullWidth size="small" value={testDate} onChange={(e) => setTestDate(e.target.value)} InputLabelProps={{ shrink: true }} />
+          <TextField label="🔵 Yayınlama Tarihi" type="date" fullWidth size="small" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} InputLabelProps={{ shrink: true }} />
 
           <Divider />
 
@@ -306,51 +308,6 @@ function EditDrawer({ version: v, onClose }: { version: Version | null; onClose:
               Yayın Tarihi: {v.releaseDate ? fmtDate(v.releaseDate) : '—'}
             </Typography>
           </Box>
-
-          {(canAdvance || canDeprecate) && (
-            <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center' }}>
-              {canAdvance && (
-                <Button
-                  variant="outlined" color="primary" size="small"
-                  disabled={advanceMut.isPending}
-                  onClick={() => advanceMut.mutate()}
-                  sx={{ flex: 1 }}
-                >
-                  {advanceMut.isPending ? <CircularProgress size={14} /> : `→ ${PHASE_META[nextPhase!]?.label ?? nextPhase}`}
-                </Button>
-              )}
-              {canDeprecate && (
-                <Button
-                  variant="outlined" color="warning" size="small"
-                  disabled={deprecateMut.isPending}
-                  onClick={() => deprecateMut.mutate(false)}
-                >
-                  {deprecateMut.isPending ? <CircularProgress size={14} /> : 'Arşivle'}
-                </Button>
-              )}
-            </Box>
-          )}
-
-          {/* Deprecate Warning Dialog */}
-          <Dialog open={Boolean(deprecateWarning)} onClose={() => setDeprecateWarning(null)}>
-            <DialogTitle>Aktif Müşteriler Var</DialogTitle>
-            <DialogContent>
-              <DialogContentText sx={{ mb: 1 }}>
-                Bu versiyonda <strong>{deprecateWarning?.count ?? 0}</strong> aktif müşteri bulunuyor.
-                Arşivlemeye devam ederseniz bu müşteriler bilgilendirilecektir.
-              </DialogContentText>
-              {deprecateWarning?.customers.map((c, i) => (
-                <Chip key={i} label={c.customerName} size="small" sx={{ mr: 0.5, mb: 0.5 }} color="warning" />
-              ))}
-            </DialogContent>
-            <DialogActions>
-              <Button onClick={() => setDeprecateWarning(null)}>İptal</Button>
-              <Button color="warning" variant="contained" disabled={deprecateMut.isPending}
-                onClick={() => deprecateMut.mutate(true)}>
-                {deprecateMut.isPending ? <CircularProgress size={14} /> : 'Yine de Arşivle'}
-              </Button>
-            </DialogActions>
-          </Dialog>
 
           <Divider />
 
@@ -373,13 +330,7 @@ function ListView({ versions, onEdit, onDelete }: {
   onDelete: (v: Version) => void;
 }) {
   const qc = useQueryClient();
-  const [advanceConfirm, setAdvanceConfirm] = useState<{ id: string; label: string; nextPhase: string } | null>(null);
   const [deprecateWarn, setDeprecateWarn] = useState<{ id: string; customers: Array<{ customerName: string }>; count: number } | null>(null);
-
-  const advanceMut = useMutation({
-    mutationFn: (id: string) => apiClient.patch(`/product-versions/${id}/advance-phase`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['versions-calendar'] }); setAdvanceConfirm(null); },
-  });
 
   const deprecateMut = useMutation({
     mutationFn: ({ id, force }: { id: string; force: boolean }) =>
@@ -407,8 +358,6 @@ function ListView({ versions, onEdit, onDelete }: {
         {versions.map((v) => {
           const phase = v.phase;
           const meta = PHASE_META[phase] ?? PHASE_META['PLANNED'];
-          const nextPhase = NEXT_PHASE[phase];
-          const canAdvance = !!nextPhase;
           const overdue = isOverdue(v);
           const daysOver = overdueDays(v);
 
@@ -443,18 +392,18 @@ function ListView({ versions, onEdit, onDelete }: {
 
               {/* Milestones — her alan için görünür etiket */}
               <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', flex: 2 }}>
-                {MILESTONE_CONFIG.map(({ key, label, color }) => {
+                {MILESTONE_CONFIG.map(({ key, label, overdueLabel, color }) => {
                   const dateVal = v[key as keyof Version] as string | null;
                   const milestoneOver = isMilestoneOverdue(key, dateVal, v.phase);
                   return (
-                    <Tooltip key={key} title={milestoneOver ? `${label} tarihi aşıldı — aşama henüz ilerlemedi` : ''}>
+                    <Tooltip key={key} title={milestoneOver ? `${overdueLabel} — aşama henüz ilerlemedi` : ''}>
                       <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 64 }}>
                         <Typography variant="caption" color={milestoneOver ? 'warning.main' : 'text.secondary'} sx={{ fontSize: 10, lineHeight: 1.3, fontWeight: milestoneOver ? 700 : 400 }}>
-                          {milestoneOver ? `⚠️ ${label}` : label}
+                          {milestoneOver ? `⚠️ ${overdueLabel}` : label}
                         </Typography>
                         <Chip
                           label={fmtDate(dateVal)}
-                          color={milestoneOver ? 'warning' : dateVal ? color : 'default'}
+                          color={milestoneOver ? (key === 'targetDate' ? 'error' : 'warning') : dateVal ? color : 'default'}
                           size="small"
                           variant={milestoneOver ? 'filled' : dateVal ? 'filled' : 'outlined'}
                           sx={{ fontSize: 11, opacity: dateVal ? 1 : 0.4, mt: 0.25 }}
@@ -467,62 +416,12 @@ function ListView({ versions, onEdit, onDelete }: {
 
               {/* Actions */}
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
-                {canAdvance && (
-                  <Button
-                    size="small" variant="outlined" color="primary"
-                    disabled={advanceMut.isPending}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setAdvanceConfirm({ id: v.id, label: `${v.product.name} ${v.version}`, nextPhase: nextPhase! });
-                    }}
-                    sx={{ whiteSpace: 'nowrap', fontSize: 12 }}
-                  >
-                    → {PHASE_META[nextPhase!]?.label ?? nextPhase}
-                  </Button>
-                )}
-                {phase === 'PRODUCTION' && (
-                  <Button
-                    size="small" variant="outlined" color="warning"
-                    disabled={deprecateMut.isPending}
-                    onClick={(e) => { e.stopPropagation(); deprecateMut.mutate({ id: v.id, force: false }); }}
-                    sx={{ whiteSpace: 'nowrap', fontSize: 12 }}
-                  >
-                    Arşivle
-                  </Button>
-                )}
                 <RowMenu onEdit={() => onEdit(v)} onDelete={() => onDelete(v)} />
               </Box>
             </Paper>
           );
         })}
       </Box>
-
-      {/* Aşama İlerletme onay dialog */}
-      <Dialog open={Boolean(advanceConfirm)} onClose={() => setAdvanceConfirm(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Aşama İlerletme</DialogTitle>
-        <DialogContent>
-          <Typography>
-            <strong>{advanceConfirm?.label}</strong> versiyonunu{' '}
-            <strong>{PHASE_META[advanceConfirm?.nextPhase ?? '']?.label ?? advanceConfirm?.nextPhase}</strong>{' '}
-            aşamasına ilerletmek istiyor musunuz?
-          </Typography>
-          {advanceConfirm?.nextPhase === 'PRODUCTION' && (
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              Yayın tarihi otomatik olarak kaydedilecek.
-            </Typography>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setAdvanceConfirm(null)}>İptal</Button>
-          <Button
-            variant="contained"
-            disabled={advanceMut.isPending}
-            onClick={() => advanceMut.mutate(advanceConfirm!.id)}
-          >
-            {advanceMut.isPending ? <CircularProgress size={16} /> : 'İlerlet'}
-          </Button>
-        </DialogActions>
-      </Dialog>
 
       {/* Deprecate Active Customers Warning */}
       <Dialog open={Boolean(deprecateWarn)} onClose={() => setDeprecateWarn(null)}>
@@ -659,7 +558,7 @@ export default function ReleaseCalendarPage() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['versions-calendar'] }); setDeleteTarget(null); },
   });
 
-  const PHASE_SORT_ORDER = ['PLANNED', 'DEVELOPMENT', 'RC', 'STAGING', 'PRODUCTION'];
+  const PHASE_SORT_ORDER = ['PLANNED', 'DEVELOPMENT', 'RC', 'PRODUCTION'];
 
   const filtered = useMemo(() => {
     return versions.filter((v) => {
@@ -713,7 +612,6 @@ export default function ReleaseCalendarPage() {
           <MenuItem value="PLANNED">{PHASE_META['PLANNED'].label}</MenuItem>
           <MenuItem value="DEVELOPMENT">{PHASE_META['DEVELOPMENT'].label}</MenuItem>
           <MenuItem value="RC">{PHASE_META['RC'].label}</MenuItem>
-          <MenuItem value="STAGING">{PHASE_META['STAGING'].label}</MenuItem>
           <MenuItem value="PRODUCTION">{PHASE_META['PRODUCTION'].label}</MenuItem>
         </TextField>
 

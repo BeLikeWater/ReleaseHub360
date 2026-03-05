@@ -155,5 +155,37 @@ export const queryKeys = {
     pipelines: ['tfs', 'pipelines'] as const,
     workItems: (filters?: Record<string, unknown>) => ['tfs', 'workItems', filters] as const,
     builds: (filters?: Record<string, unknown>) => ['tfs', 'builds', filters] as const,
+    gitRefs: (productId?: string, repoName?: string) => ['tfs', 'gitRefs', productId, repoName] as const,
+  },
+
+  // ── Customer Portal Users ──
+  customerPortalUsers: {
+    all: ['customerPortalUsers'] as const,
+    list: () => [...['customerPortalUsers'], 'list'] as const,
+  },
+
+  // ── Metrics ──
+  metrics: {
+    all: ['metrics'] as const,
+    doraTrend: (filters?: Record<string, unknown>) => ['metrics', 'doraTrend', filters] as const,
+    releaseOps: (filters?: Record<string, unknown>) => ['metrics', 'releaseOps', filters] as const,
+    todoTrend: (filters?: Record<string, unknown>) => ['metrics', 'todoTrend', filters] as const,
+    awarenessDetail: (type: string) => ['metrics', 'awarenessDetail', type] as const,
+  },
+
+  // ── Dashboard Extended ──
+  dashboardHighlights: ['dashboard', 'highlights'] as const,
+  versionTransitionDetail: (versionId: string) => ['dashboard', 'versionTransition', versionId] as const,
+
+  // ── Customer Calendar ──
+  customerCalendar: {
+    all: ['customerCalendar'] as const,
+    list: (filters?: Record<string, unknown>) => [...['customerCalendar'], 'list', filters] as const,
+  },
+
+  // ── Product Access ──
+  productAccess: {
+    all: ['productAccess'] as const,
+    byUser: (userId: string) => ['productAccess', 'byUser', userId] as const,
   },
 } as const;
