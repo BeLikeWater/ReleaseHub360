@@ -1,6 +1,7 @@
 """HTTP API wrapper for Azure PBI Analyzer MCP Server"""
 
 import asyncio
+import httpx
 from typing import Any, Dict, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -1646,7 +1647,19 @@ async def start_async_cherry_pick(request: AsyncCherryPickRequest):
         "conflict": None,
         "syncBranchName": None,
         "error": None,
+        "logs": [],
     }
+
+    def _append_log(msg: str, done: int | None = None, current: int | None = None) -> None:
+        """Append a timestamped log entry and optionally update progress counters."""
+        import datetime as _dt
+        entry = {"ts": _dt.datetime.utcnow().isoformat(timespec="seconds") + "Z", "msg": msg}
+        _cherry_pick_jobs[job_id]["logs"].append(entry)
+        if done is not None:
+            _cherry_pick_jobs[job_id]["progress"]["done"] = done
+        if current is not None:
+            _cherry_pick_jobs[job_id]["progress"]["current"] = current
+        print(f"[SYNC {job_id[:8]}] {entry['ts']} — {msg}")
 
     async def _run() -> None:
         try:
@@ -1657,12 +1670,14 @@ async def start_async_cherry_pick(request: AsyncCherryPickRequest):
                 request.pr_ids,
                 False,                      # auto_resolve_conflicts
                 request.sync_branch_prefix, # branch prefix
+                progress_callback=_append_log,
             )
             status = (result.get("status") or "failed").upper()
             sync_branch = result.get("sync_branch_name") or result.get("syncBranchName")
 
             if status == "SUCCESS":
                 pr_created = result.get("pr_created") or {}
+                _append_log("✅ Sync tamamlandı — Azure DevOps PR oluşturuldu.", done=len(request.pr_ids))
                 _cherry_pick_jobs[job_id].update({
                     "status": "SUCCESS",
                     "syncBranchName": sync_branch,
@@ -1686,6 +1701,7 @@ async def start_async_cherry_pick(request: AsyncCherryPickRequest):
                     c.get("file") or c.get("path", "") for c in conflicts
                 ]
                 merged_count = len(result.get("merged_prs") or [])
+                _append_log(f"⚠️ Çakışma tespit edildi: {len(conflict_files)} dosya — PR #{conflict_pr}")
                 _cherry_pick_jobs[job_id].update({
                     "status": "CONFLICT",
                     "syncBranchName": sync_branch,
@@ -1697,12 +1713,15 @@ async def start_async_cherry_pick(request: AsyncCherryPickRequest):
                     "conflict": {"prId": conflict_pr, "files": conflict_files},
                 })
             else:
+                err_msg = result.get("error") or result.get("message") or "Unknown error"
+                _append_log(f"❌ Sync başarısız: {err_msg}")
                 _cherry_pick_jobs[job_id].update({
                     "status": "FAILED",
                     "syncBranchName": sync_branch,
-                    "error": result.get("error") or result.get("message") or "Unknown error",
+                    "error": err_msg,
                 })
         except Exception as exc:
+            _append_log(f"❌ Beklenmeyen hata: {exc}")
             _cherry_pick_jobs[job_id].update({"status": "FAILED", "error": str(exc)})
 
     _asyncio.create_task(_run())

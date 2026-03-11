@@ -85,8 +85,50 @@ export async function fetchMatrix(params?: {
   serviceId?: string;
   status?: string;
 }): Promise<MatrixCell[]> {
+  if (!params?.productId) return [];
   const res = await apiClient.get('/service-version-matrix', { params });
-  return res.data.data ?? res.data;
+
+  // Backend { product, customers, matrix } nested shape → flatten to MatrixCell[]
+  const { product, customers, matrix } = res.data as {
+    product: { id: string; name: string };
+    customers: { id: string; name: string }[];
+    matrix: {
+      service: { id: string; name: string };
+      customers: Record<string, {
+        currentRelease: string | null;
+        latestRelease: string | null;
+        staleCount: number;
+        status: 'CURRENT' | 'WARNING' | 'CRITICAL' | 'UNKNOWN';
+        takenAt: string | null;
+        previousRelease: string | null;
+      }>;
+    }[];
+  };
+
+  if (!Array.isArray(matrix)) return [];
+
+  const customerLookup = new Map(customers.map(c => [c.id, c.name]));
+  const cells: MatrixCell[] = [];
+  for (const row of matrix) {
+    for (const [customerId, data] of Object.entries(row.customers)) {
+      cells.push({
+        customerId,
+        customerName: customerLookup.get(customerId) ?? '',
+        customerCode: '',
+        serviceId: row.service.id,
+        serviceName: row.service.name,
+        productId: product.id,
+        productName: product.name,
+        currentRelease: data.currentRelease,
+        latestRelease: data.latestRelease,
+        staleCount: data.staleCount,
+        status: data.status,
+        takenAt: data.takenAt,
+        previousRelease: data.previousRelease,
+      });
+    }
+  }
+  return cells;
 }
 
 /**

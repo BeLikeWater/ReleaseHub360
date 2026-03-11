@@ -1,0 +1,77 @@
+# ─── Global ────────────────────────────────────────────────────────────────────
+namespace: releasehub360
+
+# ─── Images ────────────────────────────────────────────────────────────────────
+images:
+  frontend:
+    repository: releasehub360/frontend
+    tag: local
+    pullPolicy: IfNotPresent
+  backend:
+    repository: releasehub360/backend
+    tag: local
+    pullPolicy: IfNotPresent
+  mcpServer:
+    repository: releasehub360/mcp-server
+    tag: local
+    pullPolicy: IfNotPresent
+
+# ─── Frontend ──────────────────────────────────────────────────────────────────
+frontend:
+  replicas: 1
+  port: 80
+  service:
+    type: LoadBalancer   # Docker Desktop: localhost:3000 (80 appsmith tarafından kullanılıyor)
+    port: 3000
+    targetPort: 80
+
+# ─── Backend ───────────────────────────────────────────────────────────────────
+backend:
+  replicas: 1
+  port: 3001
+  service:
+    type: ClusterIP
+    port: 3001
+  env:
+    nodeEnv: production
+    n8nUrl: http://n8n:5678
+    mcpServerUrl: http://mcp-server:8083
+
+# ─── MCP Server ────────────────────────────────────────────────────────────────
+mcpServer:
+  replicas: 1
+  port: 8083
+  service:
+    type: ClusterIP
+    port: 8083
+
+# ─── PostgreSQL ────────────────────────────────────────────────────────────────
+postgres:
+  image: postgres:16-alpine
+  user: rh360
+  # Override via --set or values-local.yaml / sealed-secrets in production
+  password: rh360pass
+  database: releasehub360
+  port: 5432
+  storage: 5Gi
+  service:
+    type: ClusterIP
+    port: 5432
+
+# ─── n8n ───────────────────────────────────────────────────────────────────────
+n8n:
+  # Pin to a specific version — never use latest in production
+  image: n8nio/n8n:1.42.1
+  port: 5678
+  storage: 1Gi
+  service:
+    type: LoadBalancer   # Direct access: localhost:5678
+    port: 5678
+
+# ─── Secrets (override via sealed-secrets or external-secrets in production) ───
+secrets:
+  jwtSecret: "change_me_in_production"
+  jwtRefreshSecret: "change_me_too"
+  n8nAuthToken: ""
+  tfsOrgUrl: "https://dev.azure.com/{org}"
+  tfsPat: ""

@@ -587,3 +587,177 @@ Workflow JSON veya herhangi bir dosyayı yazarken / güncellerken:
 - **Kullan:** `replace_string_in_file` veya `create_file` tool
 - **Asla kullanma:** Terminal `echo`, `cat >>`, heredoc (`<< 'EOF'`) — VS Code bu komutları kırpar, içerik sessizce kaybolur
 - **Doğrula:** Yazım sonrası `grep -n "anahtar_kelime" dosya` → boş dönerse yazma başarısız, tool ile tekrarla
+
+---
+
+## ⛔ Kısıtlamalar
+
+### Code Node'larda HTTP İstek Atılmaz — Her HTTP Çağrısı Ayrı Bir Node'dur
+
+`n8n-nodes-base.code` node'u **yalnızca** veri dönüşümü, filtreleme ve mantık işlemleri için kullanılır. İçinde `$helpers.httpRequest` veya benzeri HTTP çağrısı YAPILMAZ.
+
+**Her harici API çağrısı** → `n8n-nodes-base.httpRequest` node'u olmalıdır.
+
+```
+❌ YANLIŞ — Code node içinde HTTP
+const resp = await $helpers.httpRequest({ url: 'https://...' });
+
+✅ DOĞRU — Ayrı HTTP Request node, ardından Code node (sadece parse)
+[HTTP Request node] → [Code node: sadece resp parse et]
+```
+
+**Neden:** Her HTTP çağrısını ayrı kutuda görmek istiyoruz. Takip, debug ve retry için şart.
+
+---
+
+### Tek Sorumluluk — Her Node Bir İş Yapar
+
+Bir node'a birden fazla iş yüklenilmez:
+
+| ❌ Yanlış | ✅ Doğru |
+|---|---|
+| "Veriyi çek + filtrele + dönüştür" tek Code node | Üç ayrı node: HTTP → Filter Code → Transform Code |
+| Code node içinde HTTP + parse + compare | HTTP node + Extract Code + Compare Code |
+| Tek Code node'da 3 HTTP çağrısı | 3 ayrı HTTP node |
+
+**Kural:** Node adı açıklamalı olmalı: `Filter CS Files`, `Extract Async Methods`, `Compare Methods` — ne yaptığını söyleyen isim.
+
+---
+
+### Loop Over Items (Split In Batches) Kullanımı
+
+Birden fazla kayıt üzerinde sıralı işlem yapılacaksa `n8n-nodes-base.splitInBatches` (Loop Over Items) kullanılır.
+
+```json
+{
+  "type": "n8n-nodes-base.splitInBatches",
+  "typeVersion": 3,
+  "parameters": {
+    "batchSize": 1,
+    "options": {}
+  }
+}
+```
+
+**Connections (loop pattern):**
+```json
+"Loop Over Items": {
+  "main": [
+    [{"node": "İşlem Node", "type": "main", "index": 0}],   // index 0 = loop body
+    [{"node": "Sonraki Adım", "type": "main", "index": 0}]  // index 1 = done output
+  ]
+}
+```
+**Geri bağlantı (feedback):** Loop body'nin son node'u → Loop Over Items'ın girişine bağlanır:
+```json
+"Son İşlem Node": {
+  "main": [[{"node": "Loop Over Items", "type": "main", "index": 0}]]
+}
+```
+
+**Loop içinde context erişimi:** Loop node'un o iterasyondaki item'ına `$('Loop Over Items').first().json` ile erişilir. Bu referans loop body içindeki Code node'lardan kullanılabilir.
+
+**Veri toplama:** Loop Over Items'ın done output'u (index 1), tüm iterasyonlarda oluşan item'ların tamamını toplu olarak döndürür → Build HTML gibi son adımlar burada çalışır.
+
+---
+
+### Set Node typeVersion — Zorunlu 3.4
+
+`n8n-nodes-base.set` node'u `assignments` formatı ile kullanılıyorsa `typeVersion: 3.4` olmalıdır. `typeVersion: 3` ile `assignments` alanı n8n UI'da **boş görünür**.
+
+```json
+{
+  "type": "n8n-nodes-base.set",
+  "typeVersion": 3.4,       ← zorunlu — 3 değil, 3.4
+  "parameters": {
+    "assignments": { "assignments": [...] }
+  }
+}
+```
+
+---
+
+### n8n Veritabanına Doğrudan Erişim Yasaktır
+
+n8n-engineer rolü n8n'in iç veritabanına (SQLite veya PostgreSQL) **hiçbir koşulda doğrudan erişemez**.
+
+- `kubectl exec` ile n8n pod'una girerek `database.sqlite` dosyasını kopyalama, `sqlite3` sorgusu çalıştırma veya herhangi bir DB inspection işlemi YAPILMAZ
+- İç tablolara (`workflow_entity`, `webhook_entity`, `execution_entity` vb.) doğrudan SQLite/psql sorgusu çalıştırma YAPILMAZ
+- n8n yönetimi **yalnızca** `http://localhost:5678/api/v1/` REST API üzerinden yapılır:
+  - Workflow listele: `GET /api/v1/workflows`
+  - Workflow güncelle: `PUT /api/v1/workflows/{id}`
+  - Execution sorgula: `GET /api/v1/executions?workflowId={id}&limit=1`
+  - Aktif et: `POST /api/v1/workflows/{id}/activate`
+- Webhook kayıt sorunları (404) için: workflow'u UI'dan el ile tetikle — API ile oluşturulan workflow'larda n8n crash-recovery modunda webhook kaydı çalışmayabilir; UI'dan manual trigger her zaman çalışır
+
+### Dış Servis Kimlik Doğrulaması — Hardcoded Token Yasak
+
+Code node içine veya herhangi bir JSON alanına sabit (hardcoded) PAT/token/şifre yazılmaz.
+
+- **Doğru yöntem:** n8n Credentials (Settings → Credentials) kullanılır → HTTP Request node'da `authentication: "genericCredentialType"` + `genericAuthType: "httpHeaderAuth"` + `credential` alanıyla referans verilir
+- **Bu projede mevcut credential:** `ItsfindevAuth` (ID: `5jxcGOqgzhj1tBrT`) — Azure DevOps Header Auth
+- **Config Set node'u ile PAT taşıma:** Config node üzerinde değişken olarak tanımlanmış PAT `cfg.pat` olarak okunabilir; bu değer yalnızca Code node içindeki `$helpers.httpRequest` çağrılarında kullanılabilir — JSON/YAML dosyasına düz yazılmaz
+
+#### HTTP Request Node — ItsfindevAuth Credential Örneği
+
+```json
+{
+  "type": "n8n-nodes-base.httpRequest",
+  "parameters": {
+    "url": "https://dev.azure.com/{{ $json.org }}/{{ $json.project }}/_apis/...",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "sendQuery": true,
+    "queryParameters": { "parameters": [{ "name": "api-version", "value": "7.1" }] },
+    "options": { "timeout": 30000 }
+  },
+  "credentials": {
+    "httpHeaderAuth": { "id": "5jxcGOqgzhj1tBrT", "name": "ItsfindevAuth" }
+  }
+}
+```
+
+#### Code Node — $helpers.httpRequest ile Azure DevOps Çağrısı
+
+Code node içinde credential doğrudan geçirilemez; `cfg.pat` ile manual header kullanılır:
+
+```javascript
+// Config node'dan gelen cfg.pat ile header oluştur
+const authHeader = 'Basic ' + Buffer.from(':' + cfg.pat).toString('base64');
+
+// Azure DevOps Items API — dosya içeriğini text olarak çek
+const fileText = await $helpers.httpRequest({
+  method: 'GET',
+  url: `https://dev.azure.com/${cfg.org}/${cfg.project}/_apis/git/repositories/${cfg.repo}/items` +
+       `?path=${encodeURIComponent(filePath)}&versionDescriptor.version=${encodeURIComponent(version)}` +
+       `&versionDescriptor.versionType=branch&$format=text&api-version=7.1`,
+  headers: { 'Authorization': authHeader },
+  returnFullResponse: false,
+  ignoreHttpStatusErrors: true,
+});
+// $format=text → Azure DevOps file content'ı string olarak döner
+const code = typeof fileText === 'string' ? fileText : JSON.stringify(fileText);
+```
+
+### runOnceForEachItem vs runOnceForAllItems — Return Format Kuralı
+
+| Mode | Doğru return | Yanlış |
+|---|---|---|
+| `runOnceForEachItem` | `return { json: {...} }` (tek nesne) | `return [{ json: {...} }]` (dizi) |
+| `runOnceForAllItems` | `return [{ json: {...} }, ...]` (dizi) | `return { json: {...} }` (tek nesne) |
+
+**Per-item'dan all-items'a geçiş:** Birden fazla dosyayı veya kaydı işleyen ve her biri için HTTP çağrısı yapan node'larda `runOnceForAllItems` tercih edilir — `Promise.all` ile paralel çağrı yapılır:
+
+```javascript
+// runOnceForAllItems — tüm kayıtları paralel işle
+const fileItems = $('Split CS Files').all();
+const results = [];
+for (const item of fileItems) {
+  const [masterCode, branchCode] = await Promise.all([
+    fetchFileText(item.json.filePath, cfg.baseBranch),
+    fetchFileText(item.json.filePath, cfg.branch),
+  ]);
+  results.push({ json: { filePath: item.json.filePath, /* ... */ } });
+}
+return results;  // dizi — doğru
+```

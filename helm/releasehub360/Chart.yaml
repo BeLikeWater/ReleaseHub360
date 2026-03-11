@@ -1,0 +1,12 @@
+apiVersion: v2
+name: releasehub360
+description: ReleaseHub360 — Release Management Platform (monorepo)
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - release-management
+  - devops
+home: https://github.com/releasehub360/releasehub360
+maintainers:
+  - name: ReleaseHub360 Team

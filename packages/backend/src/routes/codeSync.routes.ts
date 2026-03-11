@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import prisma from '../lib/prisma';
-import { authenticateJWT } from '../middleware/auth.middleware';
+import { authenticateJWT, requireRole } from '../middleware/auth.middleware';
 import { AppError } from '../middleware/errorHandler.middleware';
 
 const router = Router();
@@ -9,7 +9,7 @@ router.use(authenticateJWT);
 
 const MCP_BASE = () => process.env.MCP_SERVER_URL ?? 'http://localhost:8083';
 
-async function mcpRequest(path: string, method = 'GET', body?: unknown) {
+async function mcpRequest(path: string, method = 'GET', body?: unknown, opts?: { allowNotFound?: boolean }) {
   let res: Response;
   try {
     res = await fetch(`${MCP_BASE()}${path}`, {
@@ -20,6 +20,7 @@ async function mcpRequest(path: string, method = 'GET', body?: unknown) {
   } catch {
     throw new AppError(503, 'MCP sunucusuna ulaşılamıyor. Servis geçici olarak kullanım dışı.');
   }
+  if (res.status === 404 && opts?.allowNotFound) return null;
   if (!res.ok) {
     const detail = await res.text().catch(() => res.statusText);
     throw new AppError(res.status, `MCP Server hatası: ${detail}`);
@@ -44,27 +45,34 @@ async function getProductCredsByService(serviceId: string) {
 function buildSyncBranchPrefix(version: string, serviceName: string): string {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const safeService = serviceName.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 30);
-  return `sync/v${version}-${safeService}-${date}`;
+  return `features/sync/v${version}-${safeService}-${date}`;
 }
 
-interface UserPayload { id?: string }
+/** Customer branch'in azureOrg/azureProject'i varsa onları kullan; yoksa product credentials'ı kullan. */
+function resolveSyncCredentials(
+  productCreds: { org: string; project: string; pat: string },
+  customerBranch: { azureOrg?: string | null; azureProject?: string | null; azurePat?: string | null },
+) {
+  return {
+    org: customerBranch.azureOrg || productCreds.org,
+    project: customerBranch.azureProject || productCreds.project,
+    pat: customerBranch.azurePat || productCreds.pat,
+  };
+}
+
+interface UserPayload { id?: string; userType?: string; customerId?: string; role?: string }
 
 // ─── 1. List customer branches ─────────────────────────────────────────────
 // GET /api/code-sync/customer-branches?customerId=&serviceId=
 router.get('/customer-branches', async (req, res, next) => {
   try {
-    const { customerId, serviceId } = req.query as Record<string, string | undefined>;
-
-    let repoNameFilter: string | undefined;
-    if (serviceId) {
-      const svc = await prisma.service.findUnique({ where: { id: serviceId } });
-      repoNameFilter = svc?.repoName ?? undefined;
-    }
+    const { customerId, serviceId: _serviceId } = req.query as Record<string, string | undefined>;
+    // serviceId gelirse gelecekte kullanılabilir; branch filtrelemesi sadece customerId üzerinden yapılır
+    // (müşteri reposu ürün reposundan farklı org/proje olabilir — repoName eşleştirmesi yapılmaz)
 
     const branches = await prisma.customerBranch.findMany({
       where: {
         ...(customerId ? { customerId } : {}),
-        ...(repoNameFilter ? { repoName: repoNameFilter } : {}),
         isActive: true,
       },
       include: {
@@ -87,9 +95,130 @@ router.get('/customer-branches', async (req, res, next) => {
         branchName: b.branchName,
         repoName: b.repoName,
         baseBranch: b.baseBranch,
+        azureOrg: b.azureOrg,
+        azureProject: b.azureProject,
+        description: b.description,
+        isActive: b.isActive,
         lastSync: b.syncHistory[0] ?? null,
       })),
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── 1b. Create customer branch (admin) ────────────────────────────────────
+// POST /api/code-sync/customer-branches
+router.post('/customer-branches', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req, res, next) => {
+  try {
+    const body = z.object({
+      customerId: z.string().min(1),
+      branchName: z.string().min(1),
+      repoName: z.string().min(1),
+      azureOrg: z.string().optional(),
+      azureProject: z.string().optional(),
+      azurePat: z.string().optional(),
+      baseBranch: z.string().optional(),
+      description: z.string().optional(),
+      isActive: z.boolean().default(true),
+    }).parse(req.body);
+
+    const branch = await prisma.customerBranch.create({
+      data: body,
+      include: { customer: { select: { id: true, name: true } } },
+    });
+    res.status(201).json({
+      data: {
+        id: branch.id,
+        customerId: branch.customerId,
+        customerName: branch.customer.name,
+        branchName: branch.branchName,
+        repoName: branch.repoName,
+        azureOrg: branch.azureOrg,
+        azureProject: branch.azureProject,
+        description: branch.description,
+        isActive: branch.isActive,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── 1c. Update customer branch ─────────────────────────────────────────────
+// PUT /api/code-sync/customer-branches/:id
+// Admin: tüm alanlar; Müşteri: sadece azurePat, branchName, description
+router.put('/customer-branches/:id', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const user = ((req as unknown as { user?: UserPayload }).user);
+    const isAdmin = user?.userType === 'ORG' && ['ADMIN', 'RELEASE_MANAGER'].includes(user.role ?? '');
+    const isCustomer = user?.userType === 'CUSTOMER';
+
+    if (!isAdmin && !isCustomer) throw new AppError(403, 'Yetersiz yetki.');
+
+    const branch = await prisma.customerBranch.findUnique({ where: { id } });
+    if (!branch) throw new AppError(404, 'Branch bulunamadı.');
+
+    // Customer kendi branch'ini mi güncelliyor?
+    if (isCustomer && branch.customerId !== user?.customerId) {
+      throw new AppError(403, 'Bu branch\'i düzenleme yetkiniz yok.');
+    }
+
+    let updateData: Record<string, unknown>;
+    if (isAdmin) {
+      updateData = z.object({
+        branchName: z.string().min(1).optional(),
+        repoName: z.string().min(1).optional(),
+        azureOrg: z.string().nullable().optional(),
+        azureProject: z.string().nullable().optional(),
+        azurePat: z.string().nullable().optional(),
+        baseBranch: z.string().nullable().optional(),
+        description: z.string().nullable().optional(),
+        isActive: z.boolean().optional(),
+      }).parse(req.body);
+    } else {
+      // Customer: sadece izin verilen alanlar
+      updateData = z.object({
+        azurePat: z.string().nullable().optional(),
+        branchName: z.string().min(1).optional(),
+        description: z.string().nullable().optional(),
+      }).parse(req.body);
+    }
+
+    const updated = await prisma.customerBranch.update({
+      where: { id },
+      data: updateData,
+      include: { customer: { select: { id: true, name: true } } },
+    });
+    res.json({
+      data: {
+        id: updated.id,
+        customerId: updated.customerId,
+        customerName: updated.customer.name,
+        branchName: updated.branchName,
+        repoName: updated.repoName,
+        azureOrg: updated.azureOrg,
+        azureProject: updated.azureProject,
+        description: updated.description,
+        isActive: updated.isActive,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── 1d. Delete (soft) customer branch (admin) ──────────────────────────────
+// DELETE /api/code-sync/customer-branches/:id
+router.delete('/customer-branches/:id', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req, res, next) => {
+  try {
+    const id = String(req.params['id']);
+    await prisma.customerBranch.update({
+      where: { id },
+      data: { isActive: false },
+    });
+    res.json({ data: { id, isActive: false } });
   } catch (err) {
     next(err);
   }
@@ -121,8 +250,18 @@ router.get('/delta', async (req, res, next) => {
       throw new AppError(404, 'Hedef versiyon snapshot\'u bulunamadı. Servis snapshot\'u yayınlanmış olmalı.');
     }
 
-    const srcPrIds = new Set<number>(Array.isArray(srcSnap?.prIds) ? (srcSnap!.prIds as number[]) : []);
-    const tgtPrIds: number[] = Array.isArray(tgtSnap.prIds) ? (tgtSnap.prIds as number[]) : [];
+    // prIds alanı integer[] veya {prId:number,...}[] olabilir — normalize et
+    const normalizePrIds = (raw: unknown): number[] => {
+      if (!Array.isArray(raw)) return [];
+      return raw.map((item) => {
+        if (typeof item === 'number') return item;
+        if (typeof item === 'object' && item !== null && 'prId' in item) return Number((item as { prId: unknown }).prId);
+        return NaN;
+      }).filter((n) => !isNaN(n));
+    };
+
+    const srcPrIds = new Set<number>(normalizePrIds(srcSnap?.prIds));
+    const tgtPrIds: number[] = normalizePrIds(tgtSnap.prIds);
     const deltaPrIds = tgtPrIds.filter((id) => !srcPrIds.has(id));
 
     if (deltaPrIds.length === 0) {
@@ -136,19 +275,21 @@ router.get('/delta', async (req, res, next) => {
     if (!creds) throw new AppError(400, 'Bu servise ait Azure DevOps credentials bulunamadı.');
     if (!customerBranch) throw new AppError(404, 'Müşteri branch bulunamadı.');
 
+    const syncCreds = resolveSyncCredentials(creds, customerBranch);
+
     const deltaDetails = (await mcpRequest('/api/code-sync/delta-details', 'POST', {
-      azure_org: creds.org,
-      azure_project: creds.project,
-      azure_pat: creds.pat,
+      azure_org: syncCreds.org,
+      azure_project: syncCreds.project,
+      azure_pat: syncCreds.pat,
       pr_ids: deltaPrIds,
     })) as { workitems: unknown[]; unclassified: unknown[]; total_pr_count: number };
 
     let alreadySyncedPrIds: number[] = [];
-    if (customerBranch.repoName && customerBranch.azurePat) {
+    if (customerBranch.repoName) {
       const customerPRs = (await mcpRequest('/api/code-sync/customer-branch-prs', 'POST', {
-        azure_org: creds.org,
-        azure_project: creds.project,
-        azure_pat: customerBranch.azurePat,
+        azure_org: syncCreds.org,
+        azure_project: syncCreds.project,
+        azure_pat: syncCreds.pat,
         repository_name: customerBranch.repoName,
         branch_name: customerBranch.branchName,
       }).catch(() => ({ prs: [] }))) as { prs: { prId: number }[] };
@@ -177,11 +318,11 @@ router.get('/customer-prs', async (req, res, next) => {
     if (!creds) throw new AppError(400, 'Azure DevOps credentials bulunamadı.');
     if (!customerBranch.repoName) throw new AppError(400, 'Branch\'e bağlı repo adı eksik.');
 
-    const pat = customerBranch.azurePat || creds.pat;
+    const syncCreds = resolveSyncCredentials(creds, customerBranch);
     const data = await mcpRequest('/api/code-sync/customer-branch-prs', 'POST', {
-      azure_org: creds.org,
-      azure_project: creds.project,
-      azure_pat: pat,
+      azure_org: syncCreds.org,
+      azure_project: syncCreds.project,
+      azure_pat: syncCreds.pat,
       repository_name: customerBranch.repoName,
       branch_name: customerBranch.branchName,
     });
@@ -215,10 +356,11 @@ router.post('/conflict-check', async (req, res, next) => {
     const repoName = customerBranch.repoName || svc?.repoName;
     if (!repoName) throw new AppError(400, 'Repo adı bulunamadı.');
 
+    const syncCreds = resolveSyncCredentials(creds, customerBranch);
     const data = await mcpRequest('/api/code-sync/preview', 'POST', {
-      azure_org: creds.org,
-      azure_project: creds.project,
-      azure_pat: customerBranch.azurePat || creds.pat,
+      azure_org: syncCreds.org,
+      azure_project: syncCreds.project,
+      azure_pat: syncCreds.pat,
       repository_name: repoName,
       source_branch: 'master',
       target_branch: customerBranch.branchName,
@@ -260,6 +402,7 @@ router.post('/start', async (req, res, next) => {
     const repoName = customerBranch.repoName || svc?.repoName;
     if (!repoName) throw new AppError(400, 'Repo adı bulunamadı.');
 
+    const syncCreds = resolveSyncCredentials(creds, customerBranch);
     const syncBranchPrefix = buildSyncBranchPrefix(tgtVersion.version, svc?.name ?? serviceId);
     const prDescription =
       `ReleaseHub360 tarafından otomatik oluşturulmuştur.\n\n` +
@@ -282,9 +425,9 @@ router.post('/start', async (req, res, next) => {
     });
 
     const mcpResp = (await mcpRequest('/api/code-sync/async-cherry-pick', 'POST', {
-      azure_org: creds.org,
-      azure_project: creds.project,
-      azure_pat: customerBranch.azurePat || creds.pat,
+      azure_org: syncCreds.org,
+      azure_project: syncCreds.project,
+      azure_pat: syncCreds.pat,
       repository_name: repoName,
       source_branch: 'master',
       target_branch: customerBranch.branchName,
@@ -359,14 +502,36 @@ router.get('/:syncId/status', async (req, res, next) => {
       return res.json({ data: { status: record.status, syncBranchName: record.syncBranchName } });
     }
 
-    const mcpStatus = (await mcpRequest(`/api/code-sync/async-cherry-pick/${mcpJobId}`)) as {
+    const mcpStatus = (await mcpRequest(`/api/code-sync/async-cherry-pick/${mcpJobId}`, 'GET', undefined, { allowNotFound: true })) as {
       status: string;
       syncBranchName?: string;
       progress?: unknown;
       result?: { prUrl?: string; prId?: number } | null;
       conflict?: { prId?: number; files?: string[] } | null;
       error?: string | null;
-    };
+    } | null;
+
+    // MCP job bulunamadı (servis yeniden başlatılmış olabilir) → FAILED olarak işaretle
+    if (!mcpStatus) {
+      await prisma.syncHistory.update({
+        where: { id: syncId },
+        data: {
+          status: 'FAILED',
+          completedAt: new Date(),
+          payload: {
+            ...(payload ?? {}),
+            mcpError: 'MCP job kaydı bulunamadı. MCP servisi yeniden başlatılmış olabilir.',
+          },
+        },
+      });
+      return res.json({
+        data: {
+          status: 'FAILED',
+          error: 'MCP job kaydı bulunamadı. Sync işlemi kesildi — tekrar başlatın.',
+          syncBranchName: record.syncBranchName,
+        },
+      });
+    }
 
     const newStatus = (mcpStatus.status ?? record.status).toUpperCase();
 
@@ -431,15 +596,16 @@ router.post('/:syncId/skip-and-continue', async (req, res, next) => {
     if (!creds) throw new AppError(400, 'Azure DevOps credentials bulunamadı.');
 
     const repoName = (payload?.repositoryName ?? customerBranch.repoName ?? svc?.repoName) as string;
+    const syncCreds = resolveSyncCredentials(creds, customerBranch);
     const syncBranchPrefix = buildSyncBranchPrefix(
       (payload?.targetVersionId ?? 'unknown') as string,
       svc?.name ?? repoName,
     );
 
     const mcpResp = (await mcpRequest('/api/code-sync/async-cherry-pick', 'POST', {
-      azure_org: creds.org,
-      azure_project: creds.project,
-      azure_pat: customerBranch.azurePat || creds.pat,
+      azure_org: syncCreds.org,
+      azure_project: syncCreds.project,
+      azure_pat: syncCreds.pat,
       repository_name: repoName,
       source_branch: record.sourceBranch,
       target_branch: record.targetBranch,

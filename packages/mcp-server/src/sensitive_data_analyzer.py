@@ -29,11 +29,17 @@ class SensitiveDataAnalyzer:
             self.model = os.getenv("OPENAI_MODEL", "gpt-4o")
             self.provider = "openai"
         else:
-            raise ValueError(
-                "OpenAI configuration required. Set either:\n"
-                "  - OPENAI_API_KEY for OpenAI, or\n"
-                "  - AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY for Azure OpenAI"
+            # LLM yapılandırması yoksa graceful fallback — servis başlar,
+            # ama sensitive data analizi devre dışı kalır
+            import warnings
+            warnings.warn(
+                "SensitiveDataAnalyzer: OpenAI configuration not found. "
+                "Sensitive data analysis will be disabled.",
+                RuntimeWarning
             )
+            self.client = None
+            self.model = None
+            self.provider = None
 
     def analyze_sensitive_data_finding(
         self,
@@ -61,6 +67,16 @@ class SensitiveDataAnalyzer:
         # Find all occurrences with context
         occurrences = self._find_keyword_with_context(file_content, keyword, context_lines)
         total_found = len(occurrences)
+
+        if self.client is None:
+            return {
+                "is_sensitive": None,
+                "confidence": "none",
+                "classification": "llm_not_configured",
+                "reason": "LLM not configured — sensitive data analysis disabled",
+                "total_occurrences": total_found,
+                "analyzed_count": 0,
+            }
         
         # Limit occurrences for large files to avoid token limits
         if len(occurrences) > max_occurrences:

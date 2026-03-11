@@ -179,4 +179,45 @@ router.delete('/:id', requireRole('ADMIN'), async (req, res, next) => {
   }
 });
 
+// GET /api/products/:id/license-tree
+// Returns the full ModuleGroup → Module → Service hierarchy for a product
+router.get('/:id/license-tree', async (req, res, next) => {
+  try {
+    const productId = String(req.params.id);
+    const product = await prisma.product.findUnique({
+      where: { id: productId },
+      select: { id: true, name: true },
+    });
+    if (!product) throw new AppError(404, 'Ürün bulunamadı');
+
+    const moduleGroups = await prisma.moduleGroup.findMany({
+      where: { productId },
+      select: {
+        id: true,
+        name: true,
+        modules: {
+          select: {
+            id: true,
+            name: true,
+            services: {
+              where: { isActive: true },
+              select: { id: true, name: true },
+            },
+          },
+          orderBy: { name: 'asc' },
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    res.json({
+      productId: product.id,
+      productName: product.name,
+      moduleGroups,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

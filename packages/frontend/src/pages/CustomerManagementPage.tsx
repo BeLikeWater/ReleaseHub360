@@ -16,6 +16,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import api from '@/api/client';
+import LicenseTree, { LicenseSelection } from '@/components/LicenseTree';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,10 +36,15 @@ interface Customer {
 interface CustomerProductMapping {
   id: string;
   customerId: string;
+  productId: string;
   productVersionId: string;
   branch?: string;
   environment?: string;
   notes?: string;
+  licensedModuleGroupIds: string[];
+  licensedModuleIds: string[];
+  licensedServiceIds: string[];
+  licenseTags: string[];
   customer: { name: string; code: string };
   productVersion: { version: string; phase: string; product: { name: string } };
 }
@@ -64,6 +70,12 @@ const blankCustomer = (): Partial<Customer> => ({
 const blankMapping = () => ({
   customerId: '', productVersionId: '', branch: '', environment: '', notes: '',
   productId: '',
+});
+
+const blankLicense = (): LicenseSelection => ({
+  licensedModuleGroupIds: [],
+  licensedModuleIds: [],
+  licensedServiceIds: [],
 });
 
 // ─── CustomerManagementPage ───────────────────────────────────────────────────
@@ -342,6 +354,7 @@ function MappingsTab() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingMapping, setEditingMapping] = useState<CustomerProductMapping | null>(null);
   const [mapForm, setMapForm] = useState(blankMapping());
+  const [licenseSelection, setLicenseSelection] = useState<LicenseSelection>(blankLicense());
 
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
   const [menuMapping, setMenuMapping] = useState<CustomerProductMapping | null>(null);
@@ -372,7 +385,12 @@ function MappingsTab() {
       const { productId: _pid, ...rest } = body;
       return api.post('/customer-product-mappings', rest).then((r) => r.data);
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['customer-product-mappings'] }); closeDialog(); },
+    onSuccess: async (data) => {
+      // Save license selection for newly created mapping
+      await api.put(`/customer-product-mappings/${data.data.id}/license`, licenseSelection);
+      qc.invalidateQueries({ queryKey: ['customer-product-mappings'] });
+      closeDialog();
+    },
   });
 
   const updateMutation = useMutation({
@@ -380,7 +398,12 @@ function MappingsTab() {
       const { productId: _pid, ...rest } = body;
       return api.put(`/customer-product-mappings/${id}`, rest).then((r) => r.data);
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['customer-product-mappings'] }); closeDialog(); },
+    onSuccess: async (_, variables) => {
+      // Save license selection
+      await api.put(`/customer-product-mappings/${variables.id}/license`, licenseSelection);
+      qc.invalidateQueries({ queryKey: ['customer-product-mappings'] });
+      closeDialog();
+    },
   });
 
   const deleteMutation = useMutation({
@@ -401,6 +424,7 @@ function MappingsTab() {
   const openNew = () => {
     setEditingMapping(null);
     setMapForm(blankMapping());
+    setLicenseSelection(blankLicense()); // will be populated when product is selected
     setDialogOpen(true);
   };
 
@@ -412,7 +436,12 @@ function MappingsTab() {
       branch: m.branch ?? '',
       environment: m.environment ?? '',
       notes: m.notes ?? '',
-      productId: '',
+      productId: m.productId,
+    });
+    setLicenseSelection({
+      licensedModuleGroupIds: m.licensedModuleGroupIds ?? [],
+      licensedModuleIds: m.licensedModuleIds ?? [],
+      licensedServiceIds: m.licensedServiceIds ?? [],
     });
     setDialogOpen(true);
   };
@@ -543,59 +572,77 @@ function MappingsTab() {
         </MenuItem>
       </Menu>
 
-      <Dialog open={dialogOpen} onClose={closeDialog} maxWidth="sm" fullWidth>
+      <Dialog open={dialogOpen} onClose={closeDialog} maxWidth="lg" fullWidth>
         <DialogTitle>{editingMapping ? 'Eşleştirmeyi Düzenle' : 'Yeni Eşleştirme'}</DialogTitle>
         <DialogContent>
-          <Stack spacing={2.5} mt={1}>
-            <TextField
-              select label="Müşteri" required fullWidth
-              value={mapForm.customerId}
-              onChange={(e) => setMapForm((f) => ({ ...f, customerId: e.target.value }))}
-            >
-              {customers.map((c) => (
-                <MenuItem key={c.id} value={c.id}>{c.name} ({c.code})</MenuItem>
-              ))}
-            </TextField>
-            <TextField
-              select label="Ürün" required fullWidth
-              value={mapForm.productId}
-              onChange={(e) => setMapForm((f) => ({ ...f, productId: e.target.value, productVersionId: '' }))}
-            >
-              {products.map((p) => (
-                <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>
-              ))}
-            </TextField>
-            <TextField
-              select label="Versiyon" required fullWidth
-              value={mapForm.productVersionId}
-              onChange={(e) => setMapForm((f) => ({ ...f, productVersionId: e.target.value }))}
-              disabled={!mapForm.productId}
-            >
-              {versions.map((v) => (
-                <MenuItem key={v.id} value={v.id}>{v.version} — {v.phase}</MenuItem>
-              ))}
-            </TextField>
-            <TextField
-              label="Branch" fullWidth placeholder="production"
-              value={mapForm.branch}
-              onChange={(e) => setMapForm((f) => ({ ...f, branch: e.target.value }))}
-            />
-            <TextField
-              label="Ortam" fullWidth placeholder="PROD / STAGE / DEV"
-              value={mapForm.environment}
-              onChange={(e) => setMapForm((f) => ({ ...f, environment: e.target.value }))}
-            />
-            <TextField
-              label="Notlar" fullWidth multiline rows={2}
-              value={mapForm.notes}
-              onChange={(e) => setMapForm((f) => ({ ...f, notes: e.target.value }))}
-            />
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={3} mt={1}>
+            {/* Left: Meta fields */}
+            <Stack spacing={2.5} flex={1} minWidth={280}>
+              <TextField
+                select label="Müşteri" required fullWidth
+                value={mapForm.customerId}
+                onChange={(e) => setMapForm((f) => ({ ...f, customerId: e.target.value }))}
+              >
+                {customers.map((c) => (
+                  <MenuItem key={c.id} value={c.id}>{c.name} ({c.code})</MenuItem>
+                ))}
+              </TextField>
+              <TextField
+                select label="Ürün" required fullWidth
+                value={mapForm.productId}
+                onChange={(e) => {
+                  setMapForm((f) => ({ ...f, productId: e.target.value, productVersionId: '' }));
+                  setLicenseSelection(blankLicense()); // reset; LicenseTree will select-all on load
+                }}
+              >
+                {products.map((p) => (
+                  <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>
+                ))}
+              </TextField>
+              <TextField
+                select label="Versiyon" required fullWidth
+                value={mapForm.productVersionId}
+                onChange={(e) => setMapForm((f) => ({ ...f, productVersionId: e.target.value }))}
+                disabled={!mapForm.productId}
+              >
+                {versions.map((v) => (
+                  <MenuItem key={v.id} value={v.id}>{v.version} — {v.phase}</MenuItem>
+                ))}
+              </TextField>
+              <TextField
+                label="Branch" fullWidth placeholder="production"
+                value={mapForm.branch}
+                onChange={(e) => setMapForm((f) => ({ ...f, branch: e.target.value }))}
+              />
+              <TextField
+                label="Ortam" fullWidth placeholder="PROD / STAGE / DEV"
+                value={mapForm.environment}
+                onChange={(e) => setMapForm((f) => ({ ...f, environment: e.target.value }))}
+              />
+              <TextField
+                label="Notlar" fullWidth multiline rows={2}
+                value={mapForm.notes}
+                onChange={(e) => setMapForm((f) => ({ ...f, notes: e.target.value }))}
+              />
+            </Stack>
+
+            {/* Right: License tree */}
+            <Box flex={2} minWidth={320} sx={{ borderLeft: { md: '1px solid' }, borderColor: { md: 'divider' }, pl: { md: 3 } }}>
+              <Typography variant="subtitle2" fontWeight={600} mb={1.5}>
+                Lisans Ağacı
+              </Typography>
+              <LicenseTree
+                productId={mapForm.productId}
+                value={licenseSelection}
+                onChange={setLicenseSelection}
+              />
+            </Box>
           </Stack>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={closeDialog}>İptal</Button>
           <Button variant="contained" onClick={handleSave} disabled={isSaving}>
-            {isSaving ? <CircularProgress size={18} /> : 'Eşleştir'}
+            {isSaving ? <CircularProgress size={18} /> : 'Kaydet'}
           </Button>
         </DialogActions>
       </Dialog>

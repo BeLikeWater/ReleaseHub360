@@ -140,11 +140,14 @@ router.get('/', async (req, res, next) => {
 
 // ─── POST /api/service-release-snapshots ─────────────────────────────────────
 // Release anında çağrılır. Ürünün tüm servislerine snapshot kaydeder.
+// explicitPrsByRepo: { [repoName]: prId[] } — sağlanırsa Azure'a gidilmez,
+//   Health Check ekranında görünen PR ID'leri doğrudan kaydedilir.
 const createSchema = z.object({
   productId: z.string().uuid(),
   productVersionId: z.string().uuid(),
   releaseName: z.string().optional(),
   serviceIds: z.array(z.string().uuid()).optional(), // belirtilmezse tüm ürün servisleri
+  explicitPrsByRepo: z.record(z.string(), z.array(z.number())).optional(), // repoName → prId[]
 });
 
 router.post(
@@ -206,18 +209,21 @@ router.post(
       await Promise.allSettled(
         targetServices.map(async (svc) => {
           try {
-            let prIds: { prId: number; title: string; mergeDate: string; repoName: string }[] = [];
+            let prIdIntegers: number[] = [];
 
-            if (svc.repoName) {
-              // Bu servisin son snapshot'ını bul
+            if (body.explicitPrsByRepo && svc.repoName) {
+              // Health Check ekranındaki PR'ları kullan — Azure'a gitme
+              prIdIntegers = body.explicitPrsByRepo[svc.repoName] ?? [];
+            } else if (svc.repoName) {
+              // Fallback: Azure'dan çek (eski davranış)
               const lastSnap = await prisma.serviceReleaseSnapshot.findFirst({
                 where: { serviceId: svc.id },
                 orderBy: { releasedAt: 'desc' },
                 select: { releasedAt: true },
               });
-
-              const sinceDate = lastSnap?.releasedAt ?? new Date(0); // snapshot yoksa epoch
-              prIds = await fetchMergedPRsSince(svc.repoName, sinceDate, creds);
+              const sinceDate = lastSnap?.releasedAt ?? new Date(0);
+              const fetched = await fetchMergedPRsSince(svc.repoName, sinceDate, creds);
+              prIdIntegers = fetched.map((p) => p.prId);
             }
 
             await prisma.serviceReleaseSnapshot.create({
@@ -226,7 +232,7 @@ router.post(
                 productVersionId: body.productVersionId,
                 releaseName: autoReleaseName,
                 releasedAt,
-                prIds,
+                prIds: prIdIntegers,   // integer array — delta endpoint'i bunu bekler
                 publishedBy: publishedBy ?? null,
               },
             });

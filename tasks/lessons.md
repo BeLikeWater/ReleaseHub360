@@ -149,6 +149,18 @@ Bu dosya her düzeltmeden sonra güncellenir. Copilot her oturum başında buray
 
 ---
 
+### L015 — Prisma schema değişikliği migration dosyası olmadan direkt DB'ye uygulanamaz
+**Durum:** K8s fresh Postgres'te `customer_users.invitationToken` kolonu migration'da olmadığı için eksik kaldı ve seed/login 500 verdi. Ayrıca 15+ tablo ve kolonun schema–migration drift'i tespit edildi.
+**Sorun:** Geliştiriciler Prisma schema'ya kolon ekledi ancak `prisma migrate dev` çalıştırmak yerine muhtemelen `db push` veya doğrudan SQL ile local DB'yi güncelledi. Migration dosyası yazılmadı. K8s gibi fresh bir ortamda bu drift production blocker oldu.
+**Çözüm:**
+1. `prisma migrate diff --from-url $DB_URL --to-schema-datamodel schema.prisma --script` ile tam drift tespiti
+2. Kapsamlı migration dosyası yazıldı: `20260309000002_schema_drift_fix`
+3. Idempotent SQL (`IF NOT EXISTS`, `IF EXISTS`) ile migration güvenli hale getirildi
+4. K8s DB'ye pipe ile uygulandı, `_prisma_migrations` tablosuna kayıt edildi
+**Kural:** Schema değişikliği = `prisma migrate dev` zorunlu. `db push` veya doğrudan SQL yasak. Fresh ortam testini her önemli schema değişikliğinde yap.
+
+---
+
 ### L013 — Context kaybını proaktif bildir
 **Durum:** Uzun oturumlarda conversation summary'ye düşüldüğünde veya çok sayıda task eritilirken, agent detay kaybedip hatalı varsayımlar yapabiliyor.
 **Sorun:** Kullanıcı, context'in kaybolduğunu ancak sonuçlardaki hatalardan fark ediyor — bu noktada geri dönmek maliyetli.
@@ -157,3 +169,50 @@ Bu dosya her düzeltmeden sonra güncellenir. Copilot her oturum başında buray
 2. **Backlog task'ı sırasında design doc referansı belirsizleşince** — Tekrar oku, eğer ciddi kopukluk varsa "⚠️ Context kırılması: [konu] — tekrar okuyorum" de.
 3. **5+ task art arda eritirken** — Her 3-4 task'ta kısa durum özeti ver.
 **Kural:** Context kaybını sessizce yutma. "Emin değilim ama devam edeyim" yerine "⚠️ Context kırılması" bildirimi yap. Backlog'un grep doğrulaması zaten son savunma hattı.
+
+---
+
+### L016 — n8n workflow tasarımı: commit-bazlı diff için doğru yaklaşım
+**Durum:** "Branch'taki değişen dosyaları karşılaştır" isteğini git diff API ile tasarlayınca, hangi commit'e ait değişiklik olduğunu takip etmek güçleşti. Kullanıcı commit-bazlı bir yaklaşım istedi: önce filtrelenmiş commit'leri listele, sonra her bir commit'in değiştirdiği dosyalara bak.
+**Sorun:** İlk tasarım `differences` (diff) API kullandı → tüm değişiklikleri tek blok olarak döndürür, commit bağlamı kaybolur. Ayrıca `Fetch Master Content` HTTP node'u dosya metadata döndürüyordu (`objectId`, `path`), dosya içeriği değil — `$format=text` query parametresi gerekiyordu.
+**Çözüm:**
+1. Commits API: `GET /commits?searchCriteria.itemVersion.version={branch}&searchCriteria.compareVersion.version=master` → branch'a özgü commit listesi (master'dakiler dahil değil)
+2. Code node'da `{async-phase-3}:` prefix filtreleme
+3. Her commit için: `GET /commits/{commitId}/changes` → o commit'in değiştirdiği dosyalar
+4. Dosya içeriği için `$format=text&versionDescriptor.versionType=commit` → gerçek kod string
+5. Master içeriği: aynı path, `versionDescriptor.versionType=branch&version=master`
+**Kural:** Commit-bazlı diff için: commits API → per-commit changes API → items API with `$format=text`. Diff API'yi (differences) kullanma — bağlam kaybettirır.
+
+### L017 — n8n Code node: runOnceForEachItem vs runOnceForAllItems seçimi
+**Durum:** `runOnceForEachItem` modunda `return [{ json: {...} }]` (dizi) döndürünce n8n "Code doesn't return a single object" hatası verdi.
+**Sorun:** Per-item modda `return { json: {...} }` (tek nesne) beklenir. All-items modda `return [{ json: {...} }]` (dizi) beklenir. Karıştırınca runtime error.
+**Çözüm:** HTTP çağrısı içeren Code node'larda `runOnceForAllItems` kullan → `Promise.all` ile paralel HTTP, açık dizi return. Sadece basit dönüşümlerde `runOnceForEachItem`.
+**Kural:**
+- `runOnceForEachItem` → `return { json: {...} }` (tek object) 
+- `runOnceForAllItems` → `return [{ json: {...} }, ...]` (array)
+- İçinde `$helpers.httpRequest` varsa → mutlaka `runOnceForAllItems`
+
+---
+
+### L015 — Servisleri arka planda başlatma — kullanıcıya bırak
+**Durum:** Backend veya frontend'in yeniden başlatılması gerektiğinde agent `npx tsx ... &` ve `npm run dev &` ile arka planda instance açtı. Birden fazla oturumda bu tekrarlanınca port çakışması oluştu (5173, 5174, 5175 aynı anda açık).
+**Sorun:** Agent'ın arka planda başlattığı process'ler terminal oturumuna bağlı kalmaz; biriken instance'lar API yanıtsızlığına ve belirsizliğe yol açar.
+**Çözüm:**
+- Agent **asla** `&` ile arka planda servis başlatmaz
+- Servis yeniden başlatılması gerektiğinde kullanıcıya şunu söyle:
+
+```
+⚠️ Servisleri yeniden başlatman gerekiyor. Terminalde sırasıyla:
+
+# 1. Temizle
+pkill -9 -f tsx; pkill -9 -f vite
+
+# 2. Backend (ayrı terminal)
+cd packages/backend && npx tsx src/index.ts
+
+# 3. Frontend (ayrı terminal)
+cd packages/frontend && npm run dev
+```
+
+- Doğrulama gerekliyse `curl -s http://localhost:3001/health` gibi basit bir GET isteği agent çalıştırabilir, ama **servis başlatma kullanıcıya bırakılır**
+**Kural:** "Servisleri yeniden başlatman gerekiyor, yukarıdaki komutları çalıştır" de — kendin başlatma.

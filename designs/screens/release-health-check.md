@@ -618,5 +618,107 @@ Sticky header'daki skor: tüm veriler yüklenene kadar `CircularProgress indeter
 | PR approve / merge | Tehlikeli. Kapsam dışı |
 | n8n direkt çağrıları | Backend proxy zorunludur |
 
+---
+
+## TASK-011 — Otomatik Paket Üretimi + Müşteri Paket Filtresi
+
+**Tarih:** 2026-03-06
+
+### Değişen Yapı: Wizard Sadeleşmesi
+
+**Önceki:** 3 adım — Son Kontrol → Paket Oluştur → Yayınla
+**Yeni:** 2 adım — Son Kontrol → Yayınla
+
+"Paket Oluştur" adımı tamamen kaldırılır. Backend ürünün `supportedArtifactTypes` alanına göre paketi otomatik oluşturur.
+
+### Yeni Wizard Tasarımı
+
+```
+┌────────────────────────────────────────────────────────┐
+│  🚀 Release Yayınla — Ethix NG v1.1.0               X │
+├────────────────────────────────────────────────────────┤
+│                                                        │
+│   [Son Kontrol] ──────► [Yayınla]                     │
+│        ●                    ○                          │
+│                                                        │
+├────────────────────────────────────────────────────────┤
+│  [ADIM 0 — SON KONTROL]                               │
+│                                                        │
+│  ✅ Açık PR'lar        Tümü merged                    │
+│  ✅ P0 Todo'lar        Tümü tamamlandı                │
+│  ⚠️  Breaking Change    1 adet                         │
+│  ✅ Release Note       Tümü mevcut                    │
+│  ✅ Sağlık Skoru       95/100                         │
+│                                                        │
+│  ───────────────────────────────────────────────────  │
+│  📦 Otomatik oluşturulacak paketler:                  │
+│     • Docker Image  (ethix-ng-v1.1.0)                 │
+│     • Binary        (ethix-ng-v1.1.0)                 │
+│  (Ürünün supportedArtifactTypes listesinden)          │
+│                                                        │
+│                     [İptal]  [Devam →]                │
+└────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────┐
+│  [ADIM 1 — YAYINLA]                                   │
+│                                                        │
+│  ℹ️  "Ethix NG v1.1.0" PRODUCTION'a alınacak.         │
+│                                                        │
+│  Otomatik oluşturulacak:                               │
+│  • Docker Image paketi                                 │
+│  • Binary paketi                                       │
+│                                                        │
+│  Bu işlem geri alınamaz.                              │
+│                                                        │
+│              [← Geri] [İptal] [🚀 Yayınla]           │
+└────────────────────────────────────────────────────────┘
+```
+
+### Artifact Tipi → Paket Tipi Eşlemesi
+
+| Product.supportedArtifactTypes | Oluşan VersionPackage.packageType |
+|-------------------------------|-----------------------------------|
+| `DOCKER`                      | `DOCKER_IMAGE`                    |
+| `BINARY`                      | `BINARY`                          |
+| `GIT_SYNC`                    | `GIT_ARCHIVE`                     |
+
+### Müşteri Paket Filtresi — CustomerProductVersionsPage
+
+Paketler sekmesinde yalnızca müşterinin `CPM.artifactType`'ıyla eşleşen paketler gösterilir:
+
+| CPM.artifactType | Gösterilen packageType'lar |
+|---|---|
+| `DOCKER` | `DOCKER_IMAGE` |
+| `BINARY` | `BINARY` |
+| `GIT_SYNC` | `GIT_ARCHIVE` |
+| `null` veya eşleşme yok | Tümü (fallback) |
+| `ON_PREM + IAAS` | + `HELM_CHART` eklenir |
+
+**Boş state:**
+```
+┌───────────────────────────────────────┐
+│  📦 İndirilebilir Paketler            │
+│                                       │
+│  Bu versiyon için eşleşen paket yok. │
+│                                       │
+└───────────────────────────────────────┘
+```
+
+### Handoff Notları — UX → Backend + Frontend
+
+**Backend:** `/product-versions/:id/release` endpoint'i `Product.supportedArtifactTypes`'ı oku → her tip için `VersionPackage` oluştur. Duplicate check: aynı `productVersionId + packageType` ikinci kez oluşturulmasın.
+
+**Frontend — ReleaseHealthCheckPage:**
+- `ApproveDialog` wizard'ından Step 1 (Paket Oluştur) kaldırılır
+- Step 0'a "Otomatik oluşturulacak paketler" bilgi satırı eklenir
+- `onConfirm(packages)` çağrısında packages artık boş dizi `[]` gönderilir
+
+**Frontend — CustomerProductVersionsPage:**
+- `VersionPackagesSection` içinde paket listesi `cpmArtifactType` + `deploymentModel` + `hostingType`'a göre filtrelenir
+- Filtre `filterPackagesByArtifactType(packages, cpmArtifactType, deploymentModel, hostingType)` adlı yardımcı fonksiyon olarak yazılır
+
+- RM Review bekleniyor: Hayır (akışkan mod)
+
+
 
 

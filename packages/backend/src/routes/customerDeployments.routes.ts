@@ -24,7 +24,7 @@ const requestUpdateSchema = z.object({
 });
 
 // ── POST /api/customer-deployments/approve ───────────────────────────────────
-// Customer (ON_PREM + IAAS) approves a version for a specific environment
+// Customer (ON_PREM) approves a version. IAAS → helm repo update signal; SELF_HOSTED → deploy confirm
 router.post('/approve', async (req, res, next) => {
   try {
     const body = approveSchema.parse(req.body);
@@ -44,13 +44,16 @@ router.post('/approve', async (req, res, next) => {
       throw new AppError(400, 'Bu işlem yalnızca ON_PREM modeli için geçerlidir');
     }
 
+    const isIaaS = cpm.hostingType === 'IAAS';
+    const approvalType = isIaaS ? 'HELM_IAAS_APPROVE' : 'DEPLOY_APPROVE';
+
     // Create approval log
     const approval = await prisma.approvalLog.create({
       data: {
         productVersionId: cpm.productVersionId,
         approvedBy: user.id,
         approverRole: user.role ?? 'CUSTOMER',
-        approvalType: 'DEPLOY_APPROVE',
+        approvalType,
         comment: body.comment ?? null,
         metadata: {
           customerProductMappingId: body.customerProductMappingId,
@@ -59,16 +62,25 @@ router.post('/approve', async (req, res, next) => {
           environment: body.environment,
           deploymentModel: cpm.deploymentModel,
           hostingType: cpm.hostingType,
+          helmApproval: isIaaS,
+          helmRepoUrl: isIaaS ? (cpm.helmRepoUrl ?? null) : null,
         },
       },
     });
 
-    // Create notification for org RM
+    // Notification — message differs for IaaS vs SELF_HOSTED
+    const notificationTitle = isIaaS
+      ? `IaaS Helm Onayı: ${cpm.customer.name}`
+      : `Müşteri Onayı: ${cpm.customer.name}`;
+    const notificationMessage = isIaaS
+      ? `${cpm.customer.name} müşterisi ${cpm.productVersion.product.name} v${cpm.productVersion.version} IaaS Helm onayı verdi (${body.environment} ortamı). Helm deposu güncellenebilir.`
+      : `${cpm.customer.name} müşterisi ${cpm.productVersion.product.name} v${cpm.productVersion.version} versiyonunu ${body.environment} ortamı için onayladı.`;
+
     await prisma.notification.create({
       data: {
         userId: user.id,
-        title: `Müşteri Onayı: ${cpm.customer.name}`,
-        message: `${cpm.customer.name} müşterisi ${cpm.productVersion.product.name} v${cpm.productVersion.version} versiyonunu ${body.environment} ortamı için onayladı.`,
+        title: notificationTitle,
+        message: notificationMessage,
         type: 'RELEASE',
         linkUrl: `/customer-dashboard/${cpm.customerId}`,
       },
@@ -78,9 +90,11 @@ router.post('/approve', async (req, res, next) => {
       data: {
         approvalId: approval.id,
         status: 'APPROVED',
+        approvalType,
         environment: body.environment,
         productName: cpm.productVersion.product.name,
         version: cpm.productVersion.version,
+        isIaaS,
       },
     });
   } catch (err) { next(err); }

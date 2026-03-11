@@ -1,0 +1,19 @@
+# values-local.yaml — Docker Desktop Kubernetes overrides
+# Kullanım: helm upgrade --install ... -f values.yaml -f values-local.yaml
+#
+# Bu dosyada local image'lar kullanılır (registry'e push gerekmez).
+# build-images.sh ile tag=local olarak build edilmiş image'lar beklenir.
+
+images:
+  frontend:
+    pullPolicy: Never    # Docker Desktop'ta local image kullan, çekme
+  backend:
+    pullPolicy: Never
+  mcpServer:
+    pullPolicy: Never
+
+postgres:
+  storage: 1Gi   # Local için küçük disk
+
+n8n:
+  storage: 512Mi

@@ -320,11 +320,11 @@ model CustomerProductMapping {
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 
-  // ── Subscription ──
-  subscriptionLevel        String?              // FULL | MODULE_GROUP | MODULE | SERVICE
-  subscribedModuleGroupIds String[]             @default([])
-  subscribedModuleIds      String[]             @default([])
-  subscribedServiceIds     String[]             @default([])
+  // ── License ──
+  licensedModuleGroupIds   String[]             @default([])
+  licensedModuleIds        String[]             @default([])
+  licensedServiceIds       String[]             @default([])
+  licenseTags              String[]             @default([])
 
   // ── Artifact & Deployment ──
   artifactType     String?                      // DOCKER | BINARY | GIT_SYNC
@@ -387,9 +387,11 @@ model CustomerBranch {
   updatedAt   DateTime      @updatedAt
   baseBranch  String?
   isActive    Boolean       @default(true)
-  repoName    String?
-  repoUrl     String?
-  azurePat    String?       // PAT with Code Read+Write+PR Contribute for customer repo
+  repoName      String?
+  repoUrl       String?
+  azurePat      String?       // PAT with Code Read+Write+PR Contribute for customer repo
+  azureOrg      String?       // Boşsa ürün azureOrg'u kullanılır
+  azureProject  String?       // Boşsa ürün azureProject'i kullanılır
   customer    Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
   syncHistory SyncHistory[]
 

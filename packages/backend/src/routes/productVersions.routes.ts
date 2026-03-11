@@ -239,13 +239,69 @@ const releaseBodySchema = z.object({
 router.patch('/:id/release', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req, res, next) => {
   try {
     const versionId = String(req.params.id);
-    const version = await prisma.productVersion.findUnique({ where: { id: versionId } });
+    const version = await prisma.productVersion.findUnique({
+      where: { id: versionId },
+      include: { product: { select: { id: true, name: true, supportedArtifactTypes: true } } },
+    });
     if (!version) throw new AppError(404, 'Versiyon bulunamadı');
-    if (version.releaseDate) throw new AppError(400, 'Bu versiyon zaten yayınlanmış');
+    if (version.phase === 'PRODUCTION') throw new AppError(400, 'Bu versiyon zaten yayınlanmış');
 
     const body = releaseBodySchema.parse(req.body);
 
-    // Atomik: versiyon güncelle + paket kayıtları oluştur
+    // Artifact tipi → Paket tipi eşlemesi
+    const ARTIFACT_TO_PACKAGE: Record<string, string> = {
+      DOCKER: 'DOCKER_IMAGE',
+      BINARY: 'BINARY',
+      GIT_SYNC: 'GIT_ARCHIVE',
+    };
+
+    // Ürün adından slug üret: "Ethix NG" → "ethix-ng"
+    const productSlug = version.product.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '');
+
+    // Mevcut paketleri kontrol et (duplicate önleme)
+    const existingPackages = await prisma.versionPackage.findMany({
+      where: { productVersionId: versionId },
+      select: { packageType: true },
+    });
+    const existingTypes = new Set(existingPackages.map(p => p.packageType));
+
+    // supportedArtifactTypes'dan otomatik paket listesi oluştur
+    const autoPackages = (version.product.supportedArtifactTypes ?? [])
+      .map((artifactType: string) => ARTIFACT_TO_PACKAGE[artifactType])
+      .filter((pkgType): pkgType is string => !!pkgType && !existingTypes.has(pkgType))
+      .map((packageType: string) => ({
+        productVersionId: versionId,
+        packageType,
+        name: `${productSlug}-${version.version}`,
+        version: version.version,
+        description: `Release package for ${version.product.name} ${version.version}`,
+        publishedBy: 'system',
+      }));
+
+    // Manuel gönderilen paketler (body'den) — geriye dönük uyumluluk
+    const manualPackages = (body.versionPackages ?? [])
+      .filter(pkg => !existingTypes.has(pkg.packageType) && !autoPackages.some(a => a.packageType === pkg.packageType))
+      .map(pkg => ({
+        productVersionId: versionId,
+        packageType: pkg.packageType,
+        name: pkg.name,
+        version: pkg.version,
+        description: pkg.description,
+        artifactUrl: pkg.artifactUrl,
+        helmRepoUrl: pkg.helmRepoUrl,
+        helmChartName: pkg.helmChartName,
+        imageRegistry: pkg.imageRegistry,
+        imageName: pkg.imageName,
+        imageTag: pkg.imageTag,
+        publishedBy: pkg.publishedBy ?? 'system',
+      }));
+
+    const allPackages = [...autoPackages, ...manualPackages];
+
+    // Atomik: versiyon güncelle + paketler oluştur
     const [updated] = await prisma.$transaction([
       prisma.productVersion.update({
         where: { id: versionId },
@@ -255,27 +311,10 @@ router.patch('/:id/release', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req
           notesPublished: body.notesPublished ?? true,
         },
       }),
-      ...(body.versionPackages ?? []).map(pkg =>
-        prisma.versionPackage.create({
-          data: {
-            productVersionId: versionId,
-            packageType: pkg.packageType,
-            name: pkg.name,
-            version: pkg.version,
-            description: pkg.description,
-            artifactUrl: pkg.artifactUrl,
-            helmRepoUrl: pkg.helmRepoUrl,
-            helmChartName: pkg.helmChartName,
-            imageRegistry: pkg.imageRegistry,
-            imageName: pkg.imageName,
-            imageTag: pkg.imageTag,
-            publishedBy: pkg.publishedBy ?? 'system',
-          },
-        })
-      ),
+      ...allPackages.map(pkg => prisma.versionPackage.create({ data: pkg })),
     ]);
 
-    res.json({ data: updated, packagesCreated: (body.versionPackages ?? []).length });
+    res.json({ data: updated, packagesCreated: allPackages.length });
   } catch (err) {
     next(err);
   }
@@ -413,7 +452,43 @@ router.patch('/:id/deprecate', requireRole('ADMIN', 'RELEASE_MANAGER'), async (r
 // DELETE /api/product-versions/:id
 router.delete('/:id', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req, res, next) => {
   try {
-    await prisma.productVersion.delete({ where: { id: String(req.params.id) } });
+    const versionId = String(req.params.id);
+    const version = await prisma.productVersion.findUnique({ where: { id: versionId } });
+    if (!version) throw new AppError(404, 'Versiyon bulunamadı');
+
+    // Cascade delete olmayan ilişkileri önce temizle
+    // 1. Optional FK'ler → null'a çek (kayıt kaybolmasın)
+    await prisma.customerProductMapping.updateMany({
+      where: { productVersionId: versionId },
+      data: { productVersionId: null },
+    });
+    await prisma.releaseTodo.updateMany({
+      where: { productVersionId: versionId },
+      data: { productVersionId: null },
+    });
+    await prisma.transitionIssue.updateMany({
+      where: { productVersionId: versionId },
+      data: { productVersionId: null },
+    });
+    await prisma.urgentChange.updateMany({
+      where: { releaseId: versionId },
+      data: { releaseId: null },
+    });
+    await prisma.ticketMapping.updateMany({
+      where: { productVersionId: versionId },
+      data: { productVersionId: null },
+    });
+
+    // 2. Required FK'ler → ilgili kayıtları sil
+    await prisma.serviceReleaseSnapshot.deleteMany({ where: { productVersionId: versionId } });
+    await prisma.hotfixRequest.deleteMany({ where: { productVersionId: versionId } });
+    await prisma.serviceVersion.deleteMany({ where: { productVersionId: versionId } });
+    await prisma.customerServiceVersion.deleteMany({ where: { currentVersionId: versionId } });
+
+    // 3. Versiyonu sil (schema'daki Cascade ilişkiler otomatik temizlenir:
+    //    ReleaseNote, SystemChange, VersionPackage, HealthCheck vb.)
+    await prisma.productVersion.delete({ where: { id: versionId } });
+
     res.status(204).end();
   } catch (err) {
     next(err);

@@ -84,6 +84,103 @@ res.json(result);             // ❌
 
 ---
 
+## ⚠️ Veritabanı Değişiklik Kuralları (KESİNLİKLE UYULMALI)
+
+### Temel İlke
+**Prisma schema değişikliği = migration dosyası zorunluluğu. İstisna yok.**
+
+Her DB değişikliği — kolon ekleme, tablo yaratma, enum güncelleme, index ekleme —
+`packages/backend/prisma/migrations/` altında bir `.sql` dosyasıyla belgelenmek
+zorundadır. `kubectl exec`, `psql` veya başka bir yolla **doğrudan DB'ye SQL
+çalıştırmak yasaktır.**
+
+### Doğru Akış
+
+```
+1. schema.prisma dosyasını düzenle
+2. npx prisma migrate dev --name <açıklayıcı_isim>
+   → Prisma farkı hesaplar, migration SQL'i yazar, uygular
+3. npx tsc --noEmit → 0 hata doğrula
+4. Git'e hem schema.prisma hem migrations/ klasörünü commit et
+```
+
+### K8s / Production Ortamı
+
+Kubernetes veya production'da migration uygulamak için:
+
+```bash
+# ❌ YASAK — doğrudan psql ile SQL çalıştırma
+kubectl exec -n releasehub360 postgres-0 -- psql -U rh360 -d releasehub360 -c "ALTER TABLE ..."
+
+# ✅ DOĞRU — migration dosyası yaz, backend pod'u üzerinden çalıştır
+# 1. Migration dosyasını yaz (packages/backend/prisma/migrations/TIMESTAMP_name/migration.sql)
+# 2. Backend image'ını rebuild et  → ./scripts/build-images.sh
+# 3. kubectl rollout restart deployment/backend -n releasehub360
+#    CMD içinde "prisma migrate deploy" otomatik çalışır
+```
+
+### Schema Drift Tespiti ve Düzeltme
+
+Migration dosyaları ile schema.prisma arasında drift oluştuğundan şüpheleniliyorsa:
+
+```bash
+# 1. Diff al — schema ile DB gerçek durumunu karşılaştır
+cd packages/backend
+DATABASE_URL="postgresql://..." npx prisma migrate diff \
+  --from-url "$DATABASE_URL" \
+  --to-schema-datamodel prisma/schema.prisma \
+  --script > /tmp/drift_fix.sql
+
+# 2. Çıktıyı incele — boşsa drift yok, doluysa migration yaz
+cat /tmp/drift_fix.sql
+
+# 3. Yeni migration dosyasına koy (TIMESTAMP = sırayı korur)
+mkdir -p prisma/migrations/$(date +%Y%m%d%H%M%S)_schema_drift_fix
+cp /tmp/drift_fix.sql prisma/migrations/$(date +%Y%m%d%H%M%S)_schema_drift_fix/migration.sql
+
+# 4. Uygula
+DATABASE_URL="postgresql://..." npx prisma migrate deploy
+```
+
+### Idempotent Migration Yazımı
+
+Drift fix veya acil hotfix migration'larında kesinlikle `IF NOT EXISTS` / `IF EXISTS` guard kullan:
+
+```sql
+-- ✅ Güvenli — birden fazla çalışsa da hata vermez
+ALTER TABLE "customer_users" ADD COLUMN IF NOT EXISTS "invitationToken" TEXT;
+CREATE TABLE IF NOT EXISTS "new_table" (...);
+DROP INDEX IF EXISTS "old_index_name";
+ALTER TABLE "foo" DROP COLUMN IF EXISTS "deprecated_col";
+
+-- ❌ Tehlikeli — kolon zaten varsa hata patlar, migration başarısız olur
+ALTER TABLE "customer_users" ADD COLUMN "invitationToken" TEXT;
+```
+
+### _prisma_migrations Tablosu
+
+Prisma her migration'ı `_prisma_migrations` tablosuna kaydeder.
+Bu tabloyu **elle değiştirme.** Sadece şu durumlarda dokunulabilir:
+- Manuel SQL uygulama sonrası migration'ı "uygulanmış" olarak işaretlemek için
+- Yanlış checksum nedeniyle migration takılıysa düzeltmek için
+
+```sql
+-- Acil durum: manuel uygulanan migration'ı kaydet
+INSERT INTO "_prisma_migrations" (id, checksum, finished_at, migration_name, logs, rolled_back_at, started_at, applied_steps_count)
+VALUES (gen_random_uuid()::text, 'manual', NOW(), '20260309000001_fix_name', NULL, NULL, NOW(), 1);
+```
+
+### Yasak Operasyonlar
+
+| Yasak | Neden | Alternatif |
+|---|---|---|
+| `kubectl exec ... psql -c "ALTER TABLE ..."` | Migration dosyasız DB'yi değiştirir, tekrar edilemez | Migration dosyası yaz → deploy |
+| `npx prisma db push` | Migration üretmez, schema'yı doğrudan push eder | `prisma migrate dev` kullan |
+| `npx prisma db execute --file ...` | _prisma_migrations'a kayıt etmez | `migrate deploy` kullan |
+| Production'da `migrate dev` | Interaktif, CI/CD bozar | `migrate deploy` kullan |
+
+---
+
 ## Tech Stack
 
 | Katman | Teknoloji |

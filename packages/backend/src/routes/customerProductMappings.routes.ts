@@ -13,10 +13,10 @@ const schema = z.object({
   branch: z.string().optional().nullable(),
   environment: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
-  subscriptionLevel: z.enum(['FULL', 'MODULE_GROUP', 'MODULE', 'SERVICE']).optional().nullable(),
-  subscribedModuleGroupIds: z.array(z.string()).optional(),
-  subscribedModuleIds: z.array(z.string()).optional(),
-  subscribedServiceIds: z.array(z.string()).optional(),
+  licensedModuleGroupIds: z.array(z.string()).optional(),
+  licensedModuleIds: z.array(z.string()).optional(),
+  licensedServiceIds: z.array(z.string()).optional(),
+  licenseTags: z.array(z.string()).optional(),
   artifactType: z.enum(['DOCKER', 'BINARY', 'GIT_SYNC']).optional().nullable(),
   deploymentModel: z.enum(['SAAS', 'ON_PREM']).optional().nullable(),
   hostingType: z.enum(['IAAS', 'SELF_HOSTED']).optional().nullable(),
@@ -157,6 +157,39 @@ router.put('/:id', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req, res, nex
     }
 
     res.json({ data: item });
+  } catch (err) { next(err); }
+});
+
+// PUT /api/customer-product-mappings/:id/license
+// Saves the LicenseTree selection (licensedModuleGroupIds, licensedModuleIds, licensedServiceIds, licenseTags)
+router.put('/:id/license', requireRole('ADMIN', 'RELEASE_MANAGER'), async (req, res, next) => {
+  try {
+    const licenseSchema = z.object({
+      licensedModuleGroupIds: z.array(z.string()).default([]),
+      licensedModuleIds: z.array(z.string()).default([]),
+      licensedServiceIds: z.array(z.string()).default([]),
+      licenseTags: z.array(z.string()).default([]),
+    });
+    const data = licenseSchema.parse(req.body);
+    const item = await prisma.customerProductMapping.findUnique({
+      where: { id: String(req.params.id) },
+    });
+    if (!item) throw new AppError(404, 'Eşleme bulunamadı');
+    const updated = await prisma.customerProductMapping.update({
+      where: { id: String(req.params.id) },
+      data,
+      include: {
+        customer: { select: { id: true, name: true, code: true } },
+        productVersion: {
+          select: {
+            id: true, version: true, phase: true,
+            product: { select: { id: true, name: true } },
+          },
+        },
+        product: { select: { id: true, name: true } },
+      },
+    });
+    res.json({ data: updated });
   } catch (err) { next(err); }
 });
 

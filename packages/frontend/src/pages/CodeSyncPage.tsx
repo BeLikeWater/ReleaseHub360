@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   Box, Typography, Button, Card, CardContent, Chip, LinearProgress,
   Tab, Tabs, Alert, Select, MenuItem, FormControl, InputLabel,
@@ -15,6 +15,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import apiClient from '@/api/client';
+import { useLocation } from 'react-router-dom';
 import { useAuthStore } from '@/store/authStore';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -42,6 +43,7 @@ type SyncStatus = {
   result?: { prUrl?: string; prId?: number } | null;
   conflict?: { prId?: number; files?: string[] } | null;
   error?: string | null;
+  logs?: { ts: string; msg: string }[];
 };
 type SyncRecord = {
   id: string; status: string; syncBranchName?: string; sourceBranch: string; targetBranch: string;
@@ -83,6 +85,14 @@ type DeltaParams = { sourceVersionId: string; targetVersionId: string; serviceId
 
 export default function CodeSyncPage() {
   const qc = useQueryClient();
+  const location = useLocation();
+  const navState = (location.state ?? {}) as {
+    customerId?: string;
+    productId?: string;
+    targetVersionId?: string;
+    sourceVersionId?: string | null;
+  };
+
   const [tab, setTab] = useState(0);
   const user = useAuthStore((s) => s.user);
   // CUSTOMER kullanıcısı → kendi müşterisinin branch'larını filtrele
@@ -94,6 +104,15 @@ export default function CodeSyncPage() {
   const [selectedCustomerBranchId, setSelectedCustomerBranchId] = useState('');
   const [sourceVersionId, setSourceVersionId] = useState('');
   const [targetVersionId, setTargetVersionId] = useState('');
+  const [contextDismissed, setContextDismissed] = useState(false);
+
+  // Pre-populate selectors from navigate state (e.g. "Code Sync'e Git" butonundan)
+  useEffect(() => {
+    if (navState.productId) setSelectedProductId(navState.productId);
+    if (navState.targetVersionId) setTargetVersionId(navState.targetVersionId);
+    if (navState.sourceVersionId) setSourceVersionId(navState.sourceVersionId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navState.productId, navState.targetVersionId, navState.sourceVersionId]);
 
   // Delta trigger: null = not loaded yet
   const [deltaParams, setDeltaParams] = useState<DeltaParams | null>(null);
@@ -104,6 +123,7 @@ export default function CodeSyncPage() {
   // Dialogs / workflow state
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [activeSyncId, setActiveSyncId] = useState<string | null>(null);
+  const [activeSyncPrIds, setActiveSyncPrIds] = useState<number[]>([]);
   const [conflictResult, setConflictResult] = useState<{ can_merge?: boolean; potential_conflicts?: unknown[] } | null>(null);
   const [conflictDialogOpen, setConflictDialogOpen] = useState(false);
 
@@ -146,11 +166,12 @@ export default function CodeSyncPage() {
   const customerPRs = customerPRsData?.prs ?? [];
 
   // ── Sync status polling ──
-  const { data: syncStatus } = useQuery<SyncStatus>({
+  const { data: syncStatus, error: syncStatusError } = useQuery<SyncStatus>({
     queryKey: ['sync-status', activeSyncId],
     queryFn: () => apiClient.get(`/code-sync/${activeSyncId}/status`).then(r => r.data.data),
     enabled: !!activeSyncId,
-    refetchInterval: (q) => q.state.data?.status === 'RUNNING' ? 5000 : false,
+    refetchInterval: (q) => q.state.data?.status === 'RUNNING' ? 4000 : false,
+    retry: 2,
   });
 
   // ── History ──
@@ -177,7 +198,7 @@ export default function CodeSyncPage() {
         sourceVersionId, targetVersionId, prIds: [...selectedPrIds], workitemSummary: summary, workitemCount: workitems.length,
       }).then(r => r.data.data);
     },
-    onSuccess: (data: { syncId: string }) => { setConfirmOpen(false); setActiveSyncId(data.syncId); },
+    onSuccess: (data: { syncId: string }) => { setConfirmOpen(false); setActiveSyncId(data.syncId); setActiveSyncPrIds([...selectedPrIds]); },
   });
 
   const skipAndContinueMutation = useMutation({
@@ -232,17 +253,23 @@ export default function CodeSyncPage() {
     if (!tgtVer || !selectedService) return '';
     const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const safeName = (selectedService.name ?? selectedServiceId).toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 30);
-    return `sync/v${tgtVer.version.replace(/^v/, '')}-${safeName}-${date}`;
+    return `features/sync/v${tgtVer.version.replace(/^v/, '')}-${safeName}-${date}`;
   }, [tgtVer, selectedService, selectedServiceId]);
 
   // ── Active sync progress rendering ──
-  if (activeSyncId && syncStatus) {
+  if (activeSyncId) {
+    const networkError = !syncStatus && syncStatusError
+      ? (syncStatusError as { response?: { data?: { error?: string } }; message?: string })?.response?.data?.error ?? (syncStatusError as { message?: string })?.message ?? 'Bağlantı hatası'
+      : null;
     return (
       <SyncProgressView
-        status={syncStatus}
+        status={syncStatus ?? null}
+        networkError={networkError}
+        prIds={activeSyncPrIds}
         onSkip={(prId) => skipAndContinueMutation.mutate(prId)}
         onClose={() => {
           setActiveSyncId(null);
+          setActiveSyncPrIds([]);
           qc.invalidateQueries({ queryKey: ['sync-history-tab', selectedCustomerBranchId] });
         }}
       />
@@ -258,6 +285,21 @@ export default function CodeSyncPage() {
           Ürün versiyonundaki değişiklikleri müşteri branch'ine workitem bazlı aktar
         </Typography>
       </Box>
+
+      {/* Bağlamsal Sync Banner — navigate state'ten gelince göster */}
+      {navState.productId && !contextDismissed && (
+        <Alert
+          severity="info"
+          onClose={() => setContextDismissed(true)}
+        >
+          <Typography variant="body2">
+            <strong>Bağlamsal Sync:</strong>{' '}
+            {navState.sourceVersionId
+              ? 'Kaynak versiyon tespit edildi. Hedef versiyon otomatik seçildi.'
+              : 'Kaynak versiyon tespit edilemedi — lütfen "Kaynak Versiyon" alanını manuel seçin.'}
+          </Typography>
+        </Alert>
+      )}
 
       {/* Context Bar */}
       <Card variant="outlined">
@@ -588,16 +630,18 @@ export default function CodeSyncPage() {
 // ─── Sync Progress View ───────────────────────────────────────────────────────
 
 function SyncProgressView({
-  status, onSkip, onClose,
+  status, networkError, prIds, onSkip, onClose,
 }: {
-  status: SyncStatus;
+  status: SyncStatus | null;
+  networkError: string | null;
+  prIds: number[];
   onSkip: (prId: number) => void;
   onClose: () => void;
 }) {
-  const progress = status.progress;
+  const progress = status?.progress;
   const pct = progress && progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
 
-  if (status.status === 'SUCCESS') {
+  if (status?.status === 'SUCCESS') {
     return (
       <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, textAlign: 'center', gap: 2, p: 6 }}>
         <CheckCircleIcon color="success" sx={{ fontSize: 80 }} />
@@ -620,7 +664,7 @@ function SyncProgressView({
     );
   }
 
-  if (status.status === 'CONFLICT') {
+  if (status?.status === 'CONFLICT') {
     return (
       <Box sx={{ p: 4, display: 'flex', flexDirection: 'column', gap: 2, maxWidth: 640, mx: 'auto', width: '100%' }}>
         <Alert severity="warning" icon={<WarningAmberIcon />}>
@@ -655,9 +699,9 @@ function SyncProgressView({
     );
   }
 
-  if (status.status === 'FAILED') {
+  if (status?.status === 'FAILED') {
     return (
-      <Box sx={{ p: 4, maxWidth: 560, mx: 'auto', width: '100%' }}>
+      <Box sx={{ p: 4, maxWidth: 600, mx: 'auto', width: '100%' }}>
         <Alert severity="error" icon={<ErrorOutlineIcon />}>
           <Typography fontWeight={700} gutterBottom>Sync Başarısız</Typography>
           {status.error ?? 'Bilinmeyen bir hata oluştu.'}
@@ -667,19 +711,99 @@ function SyncProgressView({
     );
   }
 
-  // RUNNING
+  // Network/query error bile olsa göster
+  if (networkError && !status) {
+    return (
+      <Box sx={{ p: 4, maxWidth: 600, mx: 'auto', width: '100%' }}>
+        <Alert severity="error" icon={<ErrorOutlineIcon />}>
+          <Typography fontWeight={700} gutterBottom>Durum Alınamıyor</Typography>
+          {networkError}
+        </Alert>
+        <Button onClick={onClose} sx={{ mt: 2 }}>Kapat</Button>
+      </Box>
+    );
+  }
+
+  // RUNNING (veya henüz ilk poll gelmedi)
+  const doneCount = progress?.done ?? 0;
+  const totalCount = progress?.total ?? prIds.length;
+  const currentPrId = progress?.current;
+  const logs = status?.logs ?? [];
+  const logEndRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [logs.length]);
+
   return (
-    <Box sx={{ p: 4, display: 'flex', flexDirection: 'column', gap: 3, maxWidth: 560, mx: 'auto', width: '100%' }}>
-      <Typography variant="h6" fontWeight={700}>Sync Devam Ediyor…</Typography>
-      <LinearProgress variant="determinate" value={pct} sx={{ height: 8, borderRadius: 4 }} />
-      <Typography variant="body2" color="text.secondary">
-        {progress?.done ?? 0} / {progress?.total ?? '?'} PR işlendi
-        {progress?.current ? ` — şu an: PR #${progress.current}` : ''}
-      </Typography>
-      {status.syncBranchName && (
+    <Box sx={{ p: 4, display: 'flex', flexDirection: 'column', gap: 3, maxWidth: 600, mx: 'auto', width: '100%' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        <CircularProgress size={24} />
+        <Typography variant="h6" fontWeight={700}>Sync Devam Ediyor…</Typography>
+      </Box>
+
+      {/* Progress bar */}
+      <Box>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+          <Typography variant="body2" color="text.secondary">
+            {doneCount} / {totalCount} PR tamamlandı
+          </Typography>
+          <Typography variant="body2" color="text.secondary">{pct}%</Typography>
+        </Box>
+        <LinearProgress variant={totalCount > 0 ? 'determinate' : 'indeterminate'} value={pct} sx={{ height: 8, borderRadius: 4 }} />
+      </Box>
+
+      {/* Adım listesi */}
+      {prIds.length > 0 && (
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75, maxHeight: 280, overflowY: 'auto', p: 1.5, bgcolor: 'action.hover', borderRadius: 2 }}>
+          {prIds.map((prId, idx) => {
+            const isDone = idx < doneCount;
+            const isCurrent = String(prId) === String(currentPrId) || (!isDone && idx === doneCount);
+            return (
+              <Box key={prId} sx={{ display: 'flex', alignItems: 'center', gap: 1.5, opacity: isDone ? 0.6 : 1 }}>
+                {isDone ? (
+                  <CheckCircleIcon color="success" sx={{ fontSize: 18 }} />
+                ) : isCurrent ? (
+                  <CircularProgress size={16} />
+                ) : (
+                  <Box sx={{ width: 18, height: 18, borderRadius: '50%', border: '2px solid', borderColor: 'divider' }} />
+                )}
+                <Typography variant="body2" sx={{ fontFamily: 'monospace', fontWeight: isCurrent ? 700 : 400 }}>
+                  PR #{prId}
+                  {isCurrent && ' — cherry-pick ediliyor…'}
+                  {isDone && ' ✓'}
+                </Typography>
+              </Box>
+            );
+          })}
+        </Box>
+      )}
+
+      {/* Log paneli */}
+      {logs.length > 0 && (
+        <Box sx={{ bgcolor: 'grey.900', borderRadius: 2, p: 1.5, maxHeight: 200, overflowY: 'auto', fontFamily: 'monospace', fontSize: 12 }}>
+          {logs.map((entry, i) => (
+            <Box key={i} sx={{ display: 'flex', gap: 1.5, color: entry.msg.startsWith('❌') ? 'error.light' : entry.msg.startsWith('⚠') ? 'warning.light' : entry.msg.startsWith('✅') ? 'success.light' : 'grey.300', lineHeight: 1.6 }}>
+              <Box component="span" sx={{ color: 'grey.500', flexShrink: 0 }}>{entry.ts.slice(11, 19)}</Box>
+              <Box component="span">{entry.msg}</Box>
+            </Box>
+          ))}
+          <div ref={logEndRef} />
+        </Box>
+      )}
+
+      {/* Sync branch adı */}
+      {status?.syncBranchName && (
         <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
           Branch: {status.syncBranchName}
         </Typography>
+      )}
+
+      {/* Hata varsa göster */}
+      {status?.error && (
+        <Alert severity="warning" sx={{ mt: 1 }}>{status.error}</Alert>
+      )}
+
+      {/* Network error (query başarılı ama status null değil) */}
+      {networkError && (
+        <Alert severity="info" sx={{ mt: 1 }}>Durum güncellenirken hata: {networkError}</Alert>
       )}
     </Box>
   );

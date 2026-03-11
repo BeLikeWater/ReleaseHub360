@@ -101,3 +101,150 @@ Belirli bir müşteriye ait tüm ürün versiyonları, servis durumları, releas
 - "Güncel" → yeşil `CheckCircle` ikonu
 - Progress bar: `LinearProgress` bileşeni, mavi themed
 - Breadcrumb: `Müşteri Yönetimi > Akbank`
+
+---
+
+## TASK-009 — IaaS Helm Chart Onaylama
+
+**Route:** `/customers/:customerId/products/:productId`  
+**Bileşen:** `CustomerProductVersionsPage.tsx`  
+**Değişen bölüm:** "Paketler" accordion → `ArtifactActionButton` → HELM_CHART satırı
+
+### Senaryo Matrisi
+
+| deploymentModel | hostingType | HELM_CHART butonu |
+|---|---|---|
+| ON_PREM | SELF_HOSTED | "HelmChart İndir" (mevcut, değişmez) |
+| ON_PREM | IAAS | "Helm Onayla" (yeni) |
+| SAAS | — | mevcut davranış |
+
+### Paketler Tablosu — IaaS Satırı
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ 📦 İndirilebilir Paketler                                        │
+├───────────────┬──────────────┬──────────┬────────────────────────┤
+│ Paket         │ Tür          │ Versiyon │ Aksiyon                │
+├───────────────┼──────────────┼──────────┼────────────────────────┤
+│ ethix-ng-helm │ ⛵ HELM CHART│ v3.2.1   │ [✅ Helm Onayla]       │
+│               │              │          │  warning/contained     │
+├───────────────┼──────────────┼──────────┼────────────────────────┤
+│ (önceki onay) │              │          │ ✓ Onaylandı 03 Mar     │
+└───────────────┴──────────────┴──────────┴────────────────────────┘
+```
+
+Buton: `color="warning" variant="contained"` + `VerifiedOutlined` ikon  
+Son onay chip: `GET /api/customer-deployments/approvals?customerProductMappingId=X` → son kayıt
+
+### Onay Dialog'u
+
+```
+┌──────────────────────────────────────────────────┐
+│  Helm Chart Onayı                              X │
+├──────────────────────────────────────────────────┤
+│  ℹ️  IaaS Helm deposu güncelleme onayı           │
+│                                                  │
+│  Ürün: Ethix NG v3.2.1                          │
+│                                                  │
+│  Ortam: [________________] ← required            │
+│           (CPM.environment varsa pre-fill)       │
+│                                                  │
+│  Yorum (isteğe bağlı):                          │
+│  [__________________________________________]    │
+│  [__________________________________________]    │
+│                                                  │
+├──────────────────────────────────────────────────┤
+│                   [İptal]  [✅ Onaylıyorum]     │
+└──────────────────────────────────────────────────┘
+```
+
+- `maxWidth="sm"`, `disableEscapeKeyDown`
+- "Onaylıyorum": `color="success" variant="contained"` — loading: `CircularProgress size={18}`
+- Başarı Snackbar: `"Onay gönderildi. Kurum ekibi bilgilendirildi."` (5 sn)
+
+### Prop Zinciri
+
+```
+mapping?.hostingType → VersionCard (cpmHostingType)
+mapping?.id          → VersionCard (cpmId)
+  ↓ VersionPackagesSection (hostingType, cpmId)
+    ↓ ArtifactActionButton (hostingType, mappingId)
+```
+
+### API Çağrıları
+
+| Endpoint | Tetikleyici |
+|---|---|
+| `POST /api/customer-deployments/approve` | "Onaylıyorum" tıklanınca |
+| `GET /api/customer-deployments/approvals?customerProductMappingId=X` | Paket satırı açılınca (IAAS+HELM_CHART) |
+
+### Handoff Notları — UX → Backend
+
+- Backend `/approve` endpoint mevcut; `hostingType: IAAS` metadata'ya dahil edilmeli
+- Notification mesajı: `"Müşteri X, Ürün Y vZ.Z.Z IaaS Helm onayı verdi."`
+- RM Review bekleniyor: Hayır (akışkan mod)
+
+---
+
+## TASK-010 — SaaS Deployment Modelinde Aksiyon Butonu Düzeltmesi
+
+**Tarih:** 2026-03-06
+**Bağlı task:** `tasks/open/TASK-010.md`
+
+### Sorun
+
+`ArtifactActionButton` kararını `cpmArtifactType` + `hostingType` üzerinden veriyor;
+`deploymentModel` hiç kullanılmıyor. SaaS müşteri DOCKER artifact tipiyle eşleştiğinde
+"Güncelleme Onayla" butonu geliyor — oysa müşteri uygulamayı barındırmıyor, yalnızca
+**güncelleme talep edebilir**.
+
+### Düzeltilmiş Aksiyon Matrisi
+
+| deploymentModel | hostingType   | packageType  | cpmArtifactType | Aksiyon Butonu         |
+|-----------------|---------------|--------------|-----------------|------------------------|
+| `SAAS`          | (herhangi)    | (herhangi)   | (herhangi)      | **Güncelleme Talep Et** |
+| `ON_PREM`       | `IAAS`        | `HELM_CHART` | —               | **Helm Onayla**         |
+| `ON_PREM`       | `SELF_HOSTED` | `HELM_CHART` | —               | **HelmChart İndir**     |
+| `ON_PREM`       | (herhangi)    | `BINARY`     | —               | **Paket İndir**         |
+| `ON_PREM`       | (herhangi)    | —            | `DOCKER`        | **Güncelleme Onayla**   |
+| `ON_PREM`       | (herhangi)    | —            | `GIT_SYNC`      | **Code Sync'e Git**     |
+| `null` / tanımsız | —           | —            | —               | artifact-type fallback  |
+
+> **Kural sırası:** `deploymentModel === 'SAAS'` kontrolü her şeyden önce gelir.
+
+### Karar Ağacı (Kod Akışı)
+
+```
+ArtifactActionButton(deploymentModel, hostingType, cpmArtifactType, pkg)
+  │
+  ├─ deploymentModel === 'SAAS'
+  │     └─► "Güncelleme Talep Et"  (her paket tipi için)
+  │
+  ├─ pkg.packageType === 'HELM_CHART'
+  │     ├─ hostingType === 'IAAS'  → "Helm Onayla" (dialog)
+  │     └─ diğer                  → "HelmChart İndir"
+  │
+  ├─ pkg.packageType === 'BINARY'  → "Paket İndir"
+  │
+  ├─ cpmArtifactType === 'DOCKER'  → "Güncelleme Onayla"
+  │
+  ├─ cpmArtifactType === 'GIT_SYNC' → "Code Sync'e Git"
+  │
+  └─ fallback → "Güncelleme Talep Et"
+```
+
+### Prop Zinciri Güncellemesi
+
+```
+mapping?.deploymentModel  →  VersionCard (cpmDeploymentModel)
+  ↓ VersionPackagesSection (deploymentModel)
+    ↓ ArtifactActionButton (deploymentModel)
+```
+
+`mapping?.hostingType`, `mapping?.id`, `mapping?.environment` zinciri TASK-009'dan mevcut; bu task yalnızca `deploymentModel` ekler.
+
+### Handoff Notları — UX → Frontend
+
+- Backend değişikliği yok; `deploymentModel` zaten CPM API'dan dönüyor.
+- Frontend'de tek değişiklik: `deploymentModel` prop zincire eklenir + karar ağacına `SAAS` öncelikli dal yazılır.
+- RM Review bekleniyor: Hayır (akışkan mod)

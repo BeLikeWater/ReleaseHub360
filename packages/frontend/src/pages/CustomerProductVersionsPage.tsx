@@ -17,11 +17,13 @@ import {
   Inventory2Outlined as PackageIcon,
   OpenInNew as OpenInNewIcon,
   ChangeHistory as ChangeHistoryIcon,
+  VerifiedOutlined as VerifiedIcon,
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom';
 import api from '@/api/client';
 import { useAuthStore } from '@/store/authStore';
+import { CustomerProductMapping } from '@/types';
 import CustomerTodoList from '@/components/CustomerTodoList';
 import CustomerReleaseNoteDrawer from '@/components/CustomerReleaseNoteDrawer';
 
@@ -216,15 +218,56 @@ const PACKAGE_TYPE_ICONS: Record<string, string> = {
   GIT_ARCHIVE:  '📂',
 };
 
-// E2-01: Artifact action button resolver based on CPM.artifactType and package type
-function ArtifactActionButton({ pkg, cpmArtifactType, customerId, productVersionId, navigate }: {
+// E2-01: Artifact action button resolver based on CPM.artifactType, hostingType and package type
+function ArtifactActionButton({ pkg, cpmArtifactType, deploymentModel, hostingType, mappingId, cpmEnvironment, customerId, productVersionId, productId, cpmCurrentVersionId, navigate }: {
   pkg: VersionPackage;
   cpmArtifactType?: string | null;
+  deploymentModel?: string | null;
+  hostingType?: string | null;
+  mappingId?: string | null;
+  cpmEnvironment?: string | null;
   customerId?: string;
   productVersionId?: string;
-  navigate: (path: string) => void;
+  productId?: string;
+  cpmCurrentVersionId?: string | null;
+  navigate: (path: string, opts?: { state?: unknown }) => void;
 }) {
   const [loading, setLoading] = useState(false);
+  const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
+  const [approvalEnv, setApprovalEnv] = useState(cpmEnvironment ?? '');
+  const [approvalComment, setApprovalComment] = useState('');
+  const [approvalSuccess, setApprovalSuccess] = useState(false);
+  // Fetch last approval for IAAS HELM_CHART
+  const isIaasHelm = pkg.packageType === 'HELM_CHART' && hostingType === 'IAAS' && !!mappingId;
+  const { data: approvalsData } = useQuery<{ data: Array<{ createdAt: string; approverRole: string }> }>({
+    queryKey: ['helm-approvals', mappingId],
+    queryFn: () =>
+      api.get('/customer-deployments/approvals', { params: { customerProductMappingId: mappingId } }).then((r) => r.data),
+    enabled: isIaasHelm,
+  });
+  const derivedLastApproval = approvalsData?.data?.[0]?.createdAt ?? null;
+  // keep local state in sync so post-approve optimistic update works
+  const [lastApprovedAt, setLastApprovedAt] = useState<string | null>(derivedLastApproval);
+
+  const doApproveHelm = async () => {
+    if (!mappingId || !approvalEnv.trim()) return;
+    setLoading(true);
+    try {
+      await api.post('/customer-deployments/approve', {
+        customerProductMappingId: mappingId,
+        environment: approvalEnv.trim(),
+        comment: approvalComment.trim() || undefined,
+      });
+      setApprovalDialogOpen(false);
+      setApprovalComment('');
+      setApprovalSuccess(true);
+      setLastApprovedAt(new Date().toISOString());
+    } catch {
+      // error shown via global interceptor
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const doDownload = async () => {
     setLoading(true);
@@ -255,6 +298,101 @@ function ArtifactActionButton({ pkg, cpmArtifactType, customerId, productVersion
       setLoading(false);
     }
   };
+
+  // SaaS → müşteri sadece talep eder, deploy edemez
+  if (deploymentModel === 'SAAS') {
+    return (
+      <Button size="small" variant="outlined" color="info" disabled={loading}
+        onClick={doTriggerDeploy}>
+        {loading ? <CircularProgress size={14} sx={{ mr: 1 }} /> : null} Güncelleme Talep Et
+      </Button>
+    );
+  }
+
+  // IaaS Helm Chart → onay akışı
+  if (isIaasHelm) {
+    return (
+      <>
+        <Stack spacing={0.5}>
+          <Button
+            size="small"
+            variant="contained"
+            color="warning"
+            startIcon={<VerifiedIcon fontSize="small" />}
+            onClick={() => setApprovalDialogOpen(true)}
+          >
+            Helm Onayla
+          </Button>
+          {lastApprovedAt && (
+            <Chip
+              size="small"
+              label={`✓ Onaylandı ${new Date(lastApprovedAt).toLocaleDateString('tr-TR')}`}
+              color="success"
+              variant="outlined"
+              sx={{ fontSize: 10 }}
+            />
+          )}
+        </Stack>
+
+        {/* Onay Dialog */}
+        <Dialog
+          open={approvalDialogOpen}
+          onClose={() => setApprovalDialogOpen(false)}
+          maxWidth="sm"
+          fullWidth
+          disableEscapeKeyDown
+        >
+          <DialogTitle>Helm Chart Onayı</DialogTitle>
+          <DialogContent>
+            <Alert severity="info" sx={{ mb: 2 }}>
+              Bu onay kuruma gönderilecek ve IaaS Helm deposunun güncellenmesi için tetikleyici olarak kullanılacak.
+            </Alert>
+            <Stack spacing={2} mt={1}>
+              <TextField
+                label="Ortam"
+                required
+                fullWidth
+                value={approvalEnv}
+                onChange={(e) => setApprovalEnv(e.target.value)}
+                placeholder="PROD / STAGE / DEV"
+                error={!approvalEnv.trim()}
+                helperText={!approvalEnv.trim() ? 'Ortam zorunludur' : ''}
+              />
+              <TextField
+                label="Yorum (isteğe bağlı)"
+                fullWidth
+                multiline
+                rows={2}
+                value={approvalComment}
+                onChange={(e) => setApprovalComment(e.target.value)}
+              />
+            </Stack>
+          </DialogContent>
+          <DialogActions sx={{ px: 3, pb: 2 }}>
+            <Button onClick={() => setApprovalDialogOpen(false)} disabled={loading}>İptal</Button>
+            <Button
+              variant="contained"
+              color="success"
+              disabled={loading || !approvalEnv.trim()}
+              onClick={doApproveHelm}
+              startIcon={loading ? <CircularProgress size={14} /> : <VerifiedIcon />}
+            >
+              Onaylıyorum
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Başarı Snackbar */}
+        <Snackbar
+          open={approvalSuccess}
+          autoHideDuration={5000}
+          onClose={() => setApprovalSuccess(false)}
+          message="Onay gönderildi. Kurum ekibi bilgilendirildi."
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+        />
+      </>
+    );
+  }
 
   if (pkg.packageType === 'HELM_CHART') {
     return (
@@ -288,7 +426,14 @@ function ArtifactActionButton({ pkg, cpmArtifactType, customerId, productVersion
   if (cpmArtifactType === 'GIT_SYNC') {
     return (
       <Button size="small" variant="outlined" color="secondary"
-        onClick={() => navigate('/code-sync')}>
+        onClick={() => navigate('/code-sync', {
+          state: {
+            customerId,
+            productId,
+            targetVersionId: productVersionId,
+            sourceVersionId: cpmCurrentVersionId ?? null,
+          },
+        })}>
         Code Sync&apos;e Git
       </Button>
     );
@@ -303,10 +448,37 @@ function ArtifactActionButton({ pkg, cpmArtifactType, customerId, productVersion
   );
 }
 
-function VersionPackagesSection({ versionId, cpmArtifactType, customerId }: {
+// Helper: CPM artifact tipine göre paket filtresi
+function filterPackagesByArtifactType(
+  packages: VersionPackage[],
+  cpmArtifactType?: string | null,
+  deploymentModel?: string | null,
+  hostingType?: string | null
+): VersionPackage[] {
+  if (!cpmArtifactType) return packages;
+  const ARTIFACT_TO_PKG: Record<string, string> = {
+    DOCKER: 'DOCKER_IMAGE',
+    BINARY: 'BINARY',
+    GIT_SYNC: 'GIT_ARCHIVE',
+  };
+  const allowed = new Set<string>();
+  const pk = ARTIFACT_TO_PKG[cpmArtifactType];
+  if (pk) allowed.add(pk);
+  if (deploymentModel === 'ON_PREM' && hostingType === 'IAAS') allowed.add('HELM_CHART');
+  if (allowed.size === 0) return packages;
+  return packages.filter((p) => allowed.has(p.packageType));
+}
+
+function VersionPackagesSection({ versionId, cpmArtifactType, deploymentModel, hostingType, cpmId, cpmEnvironment, customerId, productId, cpmCurrentVersionId }: {
   versionId: string;
   cpmArtifactType?: string | null;
+  deploymentModel?: string | null;
+  hostingType?: string | null;
+  cpmId?: string | null;
+  cpmEnvironment?: string | null;
   customerId?: string;
+  productId?: string;
+  cpmCurrentVersionId?: string | null;
 }) {
   const navigate = useNavigate();
   const { data, isLoading, isError } = useQuery<{ data: VersionPackage[] }>({
@@ -315,11 +487,16 @@ function VersionPackagesSection({ versionId, cpmArtifactType, customerId }: {
   });
 
   const packages = data?.data ?? [];
+  const filteredPackages = filterPackagesByArtifactType(packages, cpmArtifactType, deploymentModel, hostingType);
 
   if (isLoading) return <CircularProgress size={20} sx={{ m: 2 }} />;
   if (isError) return <Typography variant="caption" color="error" sx={{ p: 2 }}>Yüklenemedi.</Typography>;
-  if (packages.length === 0)
-    return <Typography variant="body2" color="text.disabled" sx={{ p: 2, fontStyle: 'italic' }}>Bu versiyona ait paket tanımlanmamış.</Typography>;
+  if (filteredPackages.length === 0)
+    return (
+      <Typography variant="body2" color="text.disabled" sx={{ p: 2, fontStyle: 'italic' }}>
+        {packages.length === 0 ? 'Bu versiyona ait paket tanımlanmamış.' : 'Bu versiyon için eşleşen paket yok.'}
+      </Typography>
+    );
 
   return (
     <Table size="small">
@@ -332,7 +509,7 @@ function VersionPackagesSection({ versionId, cpmArtifactType, customerId }: {
         </TableRow>
       </TableHead>
       <TableBody>
-        {packages.map((pkg) => (
+        {filteredPackages.map((pkg) => (
           <TableRow key={pkg.id}>
             <TableCell>
               <Typography variant="body2" fontWeight={600}>{pkg.name}</Typography>
@@ -361,8 +538,14 @@ function VersionPackagesSection({ versionId, cpmArtifactType, customerId }: {
               <ArtifactActionButton
                 pkg={pkg}
                 cpmArtifactType={cpmArtifactType}
+                deploymentModel={deploymentModel}
+                hostingType={hostingType}
+                mappingId={cpmId}
+                cpmEnvironment={cpmEnvironment}
                 customerId={customerId}
                 productVersionId={versionId}
+                productId={productId}
+                cpmCurrentVersionId={cpmCurrentVersionId}
                 navigate={navigate}
               />
             </TableCell>
@@ -442,7 +625,13 @@ function VersionCard({
   productName,
   transitions,
   cpmArtifactType,
+  cpmDeploymentModel,
+  cpmHostingType,
+  cpmId,
+  cpmEnvironment,
   customerId,
+  productId,
+  cpmCurrentVersionId,
   onOpenReleaseNotes,
   onOpenTodos,
   onOpenIssue,
@@ -452,7 +641,13 @@ function VersionCard({
   productName: string;
   transitions: CustomerVersionTransition[];
   cpmArtifactType?: string | null;
+  cpmDeploymentModel?: string | null;
+  cpmHostingType?: string | null;
+  cpmId?: string | null;
+  cpmEnvironment?: string | null;
   customerId?: string;
+  productId?: string;
+  cpmCurrentVersionId?: string | null;
   onOpenReleaseNotes: (versionId: string, versionName: string, productName: string) => void;
   onOpenTodos: (versionId: string, versionName: string) => void;
   onOpenIssue: (productVersionId: string, versionName: string) => void;
@@ -627,7 +822,13 @@ function VersionCard({
           <VersionPackagesSection
             versionId={version.id}
             cpmArtifactType={cpmArtifactType}
+            deploymentModel={cpmDeploymentModel}
+            hostingType={cpmHostingType}
+            cpmId={cpmId}
+            cpmEnvironment={cpmEnvironment}
             customerId={customerId}
+            productId={productId}
+            cpmCurrentVersionId={cpmCurrentVersionId}
           />
         </Box>
       )}
@@ -684,9 +885,7 @@ export default function CustomerProductVersionsPage() {
     enabled: !!productId,
   });
 
-  const { data: cpmData } = useQuery<{
-    data: { id: string; productVersionId: string; artifactType?: string | null; productVersion: { id: string; version: string; product: { id: string; name: string } } }[];
-  }>({
+  const { data: cpmData } = useQuery<{ data: CustomerProductMapping[] }>({
     queryKey: ['customer-product-mappings', customerId],
     queryFn: () => api.get('/customer-product-mappings', { params: { customerId } }).then((r) => r.data),
     enabled: !!customerId,
@@ -726,7 +925,7 @@ export default function CustomerProductVersionsPage() {
     return db.localeCompare(da);
   });
 
-  const mapping = cpmData?.data?.find((m) => m.productVersion.product.id === productId);
+  const mapping = cpmData?.data?.find((m) => m.productVersion?.product?.id === productId);
   const currentVersionId = mapping?.productVersionId ?? null;
   const productName = sortedVersions[0]?.product?.name ?? 'Ürün';
   const currentVersion = sortedVersions.find((v) => v.id === currentVersionId);
@@ -837,7 +1036,13 @@ export default function CustomerProductVersionsPage() {
                 productName={productName}
                 transitions={transitions}
                 cpmArtifactType={mapping?.artifactType}
+                cpmDeploymentModel={mapping?.deploymentModel}
+                cpmHostingType={mapping?.hostingType}
+                cpmId={mapping?.id}
+                cpmEnvironment={mapping?.environment}
                 customerId={customerId}
+                productId={productId}
+                cpmCurrentVersionId={currentVersionId}
                 onOpenReleaseNotes={handleOpenReleaseNotes}
                 onOpenTodos={handleOpenTodos}
                 onOpenIssue={handleOpenIssue}

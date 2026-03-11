@@ -266,14 +266,15 @@ export interface CustomerProductMapping {
   id: string;
   customerId: string;
   productVersionId: string;
+  productId?: string;
   branch: string | null;
   environment: string | null;
   notes: string | null;
-  // Subscription
-  subscriptionLevel: SubscriptionLevel | null;
-  subscribedModuleGroupIds: string[];
-  subscribedModuleIds: string[];
-  subscribedServiceIds: string[];
+  // License
+  licensedModuleGroupIds: string[];
+  licensedModuleIds: string[];
+  licensedServiceIds: string[];
+  licenseTags: string[];
   // Artifact & Deployment
   artifactType: CpmArtifactType | null;
   deploymentModel: CpmDeploymentModel | null;
@@ -294,6 +295,7 @@ export interface CustomerProductMapping {
 export interface CustomerBranch {
   id: string;
   customerId: string;
+  customerName?: string;
   branchName: string;
   description: string | null;
   baseBranch: string | null;
@@ -301,6 +303,8 @@ export interface CustomerBranch {
   repoName: string | null;
   repoUrl: string | null;
   azurePat: string | null;
+  azureOrg: string | null;
+  azureProject: string | null;
   createdAt: string;
   updatedAt: string;
 }

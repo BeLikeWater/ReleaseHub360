@@ -1429,44 +1429,32 @@ class AzureDevOpsClient:
         target_branch: str, 
         pr_ids: List[int],
         auto_resolve_conflicts: bool = False,
-        sync_branch_prefix: str = "sync"
+        sync_branch_prefix: str = "sync",
+        progress_callback=None,
     ) -> Dict[str, Any]:
-        """Execute code sync by creating sync branch, merging PRs, and creating PR
-        
-        This method:
-        1. Creates a sync branch from target branch
-        2. Merges specified PR commits
-        3. Handles conflicts (with optional AI resolution)
-        4. Pushes sync branch
-        5. Creates a PR for review
-        
-        Args:
-            repository_name: Name of the repository
-            source_branch: Source branch (your master)
-            target_branch: Target branch (customer branch)
-            pr_ids: List of PR IDs to sync
-            auto_resolve_conflicts: Use AI to resolve conflicts
-            sync_branch_prefix: Prefix for sync branch name
-        
-        Returns:
-            Dictionary with sync execution results
-        """
+        """Execute code sync by creating sync branch, merging PRs, and creating PR"""
         import tempfile
         import subprocess
         import shutil
         from pathlib import Path
         from datetime import datetime
-        
+
+        def _log(msg: str, done: int | None = None, current=None) -> None:
+            print(f"[code_sync] {msg}")
+            if progress_callback:
+                progress_callback(msg, done, current)
+
         temp_dir = None
-        
+
         try:
             async with httpx.AsyncClient(timeout=600.0) as client:
                 # Get repository details
+                _log(f"📡 Repo bilgileri alınıyor: {repository_name}")
                 repo_url = f"https://dev.azure.com/{self.organization}/{self.project}/_apis/git/repositories/{repository_name}"
                 repo_response = await client.get(repo_url, headers=self.headers, params={"api-version": self.api_version})
                 if repo_response.status_code != 200:
                     raise Exception(f"Repository '{repository_name}' not found")
-                
+
                 repo_data = repo_response.json()
                 repository_id = repo_data.get("id")
                 clone_url = repo_data.get("remoteUrl")
@@ -1474,22 +1462,24 @@ class AzureDevOpsClient:
                 # Get commit SHAs from PR IDs
                 commit_shas = []
                 merged_prs = []
-                
+
+                _log(f"🔍 PR commit SHA'ları alınıyor ({len(pr_ids)} PR)...")
                 for pr_id in pr_ids:
+                    _log(f"   PR #{pr_id} sorgulanıyor...")
                     pr_url = f"https://dev.azure.com/{self.organization}/{self.project}/_apis/git/pullrequests/{pr_id}"
                     pr_response = await client.get(pr_url, headers=self.headers, params={"api-version": self.api_version})
-                    
+
                     if pr_response.status_code == 200:
                         pr_data = pr_response.json()
-                        
+
                         # Get source commit
                         last_merge_source = pr_data.get("lastMergeSourceCommit", {})
                         commit_id = last_merge_source.get("commitId")
-                        
+
                         if not commit_id:
                             last_merge_commit = pr_data.get("lastMergeCommit", {})
                             commit_id = last_merge_commit.get("commitId")
-                        
+
                         if commit_id:
                             commit_shas.append(commit_id)
                             merged_prs.append({
@@ -1497,8 +1487,14 @@ class AzureDevOpsClient:
                                 "commit_ids": [commit_id],
                                 "title": pr_data.get("title")
                             })
-                
+                            _log(f"   PR #{pr_id} → commit {commit_id[:10]}... ✓")
+                        else:
+                            _log(f"   PR #{pr_id} → commit SHA bulunamadı, atlandı")
+                    else:
+                        _log(f"   PR #{pr_id} → Azure API {pr_response.status_code}, atlandı")
+
                 if not commit_shas:
+                    _log("❌ Hiçbir PR için geçerli commit bulunamadı")
                     return {
                         "status": "failed",
                         "message": "No valid commits found for the given PR IDs",
@@ -1509,28 +1505,31 @@ class AzureDevOpsClient:
                         "merged_prs": []
                     }
                 
+                _log(f"✅ {len(commit_shas)} / {len(pr_ids)} PR için commit SHA alındı")
+
                 # Create temporary directory
                 temp_dir = tempfile.mkdtemp(prefix="code_sync_execute_")
                 repo_path = Path(temp_dir) / "repo"
-                
+
                 # Fix clone URL
                 if "@dev.azure.com" in clone_url:
                     clone_url = clone_url.split("@dev.azure.com")[1]
                     clone_url = "https://dev.azure.com" + clone_url
-                
+
                 clone_url_with_auth = clone_url.replace("https://", f"https://{self.pat}@")
-                
+
                 # Prepare git environment with credentials
                 git_env = {
                     **os.environ,
-                    "GIT_TERMINAL_PROMPT": "0",  # Disable interactive prompts
-                    "GIT_ASKPASS": "echo",  # Prevent password prompts
+                    "GIT_TERMINAL_PROMPT": "0",
+                    "GIT_ASKPASS": "echo",
                     "GIT_USERNAME": self.pat,
                     "GIT_PASSWORD": self.pat,
-                    "GIT_EDITOR": "true"  # Disable git editor (prevents hanging on commit messages)
+                    "GIT_EDITOR": "true"
                 }
-                
-                # Clone repository - don't use shallow clone to get all branches
+
+                # Clone repository
+                _log(f"📥 Repository klonlanıyor: {repository_name}...")
                 clone_result = subprocess.run(
                     ["git", "clone", clone_url_with_auth, str(repo_path)],
                     capture_output=True,
@@ -1538,16 +1537,19 @@ class AzureDevOpsClient:
                     timeout=300,
                     env=git_env
                 )
-                
+
                 if clone_result.returncode != 0:
                     raise Exception(f"Git clone failed: {clone_result.stderr}")
-                
+
+                _log(f"✅ Repository klonlandı: {repository_name}")
+
                 # Configure git with credential store
                 subprocess.run(["git", "config", "user.email", "code-sync@automation.com"], cwd=repo_path, check=True)
                 subprocess.run(["git", "config", "user.name", "Code Sync Bot"], cwd=repo_path, check=True)
                 subprocess.run(["git", "config", "credential.helper", "store"], cwd=repo_path, check=True)
-                
+
                 # Fetch specific target branch with full history
+                _log(f"🌿 Target branch fetch ediliyor: {target_branch}")
                 fetch_target_result = subprocess.run(
                     ["git", "fetch", "origin", f"refs/heads/{target_branch}:refs/remotes/origin/{target_branch}"],
                     cwd=repo_path,
@@ -1555,7 +1557,7 @@ class AzureDevOpsClient:
                     text=True,
                     timeout=120
                 )
-                
+
                 # List remote branches to debug
                 list_remote_result = subprocess.run(
                     ["git", "branch", "-r"],
@@ -1563,14 +1565,13 @@ class AzureDevOpsClient:
                     capture_output=True,
                     text=True
                 )
-                
+
                 remote_branches = list_remote_result.stdout
                 target_branch_ref = f"origin/{target_branch}"
-                
+
                 if target_branch_ref not in remote_branches:
                     raise Exception(f"Target branch '{target_branch}' not found in remote after fetch. Available branches: {remote_branches}")
 
-                
                 # Checkout target branch
                 checkout_result = subprocess.run(
                     ["git", "checkout", "-b", target_branch, target_branch_ref],
@@ -1578,7 +1579,7 @@ class AzureDevOpsClient:
                     capture_output=True,
                     text=True
                 )
-                
+
                 if checkout_result.returncode != 0:
                     # Maybe branch already exists locally, just checkout
                     checkout_result = subprocess.run(
@@ -1590,14 +1591,16 @@ class AzureDevOpsClient:
                     if checkout_result.returncode != 0:
                         raise Exception(f"Failed to checkout target branch '{target_branch}': {checkout_result.stderr}")
 
-                
-                # Create sync branch name with timestamp
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                sync_branch_name = f"{target_branch}_{sync_branch_prefix}_{timestamp}"
-                
+                _log(f"✅ Target branch checkout edildi: {target_branch}")
+
+                # Use sync_branch_prefix directly as branch name (backend already builds the full name incl. date)
+                sync_branch_name = sync_branch_prefix
+
                 # Create and checkout sync branch
+                _log(f"🔀 Sync branch oluşturuluyor: {sync_branch_name}")
                 subprocess.run(["git", "checkout", "-b", sync_branch_name], cwd=repo_path, check=True, capture_output=True)
-                
+                _log(f"✅ Sync branch oluşturuldu: {sync_branch_name}")
+
                 # Fetch commits we need
                 for commit_sha in commit_shas:
                     subprocess.run(
@@ -1611,18 +1614,28 @@ class AzureDevOpsClient:
                 conflicts = []
                 merge_commit_id = None
                 has_conflicts = False
-                
-                for commit_sha in commit_shas:
+
+                # Commit SHA → PR ID ters eşleme (log için)
+                sha_to_pr: dict = {pr["commit_ids"][0]: pr["pr_id"] for pr in merged_prs if pr.get("commit_ids")}
+
+                _log(f"🍒 Cherry-pick başlıyor — {len(commit_shas)} commit...")
+                for idx, commit_sha in enumerate(commit_shas):
+                    pr_id_for_log = sha_to_pr.get(commit_sha, commit_sha[:10])
+                    _log(f"   [{idx + 1}/{len(commit_shas)}] PR #{pr_id_for_log} cherry-pick yapılıyor...", current=pr_id_for_log)
                     result = subprocess.run(
                         ["git", "cherry-pick", commit_sha],
                         cwd=repo_path,
                         capture_output=True,
                         text=True
                     )
-                    
+
+                    if result.returncode == 0:
+                        done_count = idx + 1
+                        _log(f"   \u2705 PR #{pr_id_for_log} cherry-pick tamamland\u0131 ({done_count}/{len(commit_shas)})", done=done_count, current=None)
+
                     if result.returncode != 0:
                         has_conflicts = True
-                        
+
                         # Get conflicted files
                         conflict_result = subprocess.run(
                             ["git", "diff", "--name-only", "--diff-filter=U"],
@@ -1630,9 +1643,10 @@ class AzureDevOpsClient:
                             capture_output=True,
                             text=True
                         )
-                        
+
                         conflict_files = [f for f in conflict_result.stdout.strip().split("\n") if f]
-                        
+                        _log(f"   ⚠️  PR #{pr_id_for_log} çakışma! {len(conflict_files)} dosya: {', '.join(conflict_files[:3])}")
+
                         for file in conflict_files:
                             conflict_info = {
                                 "file": file,
@@ -1939,11 +1953,10 @@ Return ONLY the resolved file content WITHOUT any conflict markers or explanatio
                     env=git_env
                 )
                 merge_commit_id = commit_result.stdout.strip()
-                print(f"   ✅ Final commit ID: {merge_commit_id[:12]}...")
-                
+                _log(f"   ✅ Final commit ID: {merge_commit_id[:12]}...")
+
                 # Set remote URL with PAT for push
-                print(f"\n🔗 Preparing to push sync branch...")
-                print(f"   🔄 Setting remote URL with authentication...")
+                _log(f"⬆️  Sync branch push ediliyor: {sync_branch_name}")
                 subprocess.run(
                     ["git", "remote", "set-url", "origin", clone_url_with_auth],
                     cwd=repo_path,
@@ -1951,11 +1964,7 @@ Return ONLY the resolved file content WITHOUT any conflict markers or explanatio
                     capture_output=True,
                     env=git_env
                 )
-                print(f"   ✅ Remote URL updated")
-                
-                # Push sync branch with authentication
-                print(f"\n⬆️  Pushing sync branch: {sync_branch_name}")
-                print(f"   🔄 Running: git push -u origin {sync_branch_name}")
+
                 push_result = subprocess.run(
                     ["git", "push", "-u", "origin", sync_branch_name],
                     cwd=repo_path,
@@ -1964,21 +1973,15 @@ Return ONLY the resolved file content WITHOUT any conflict markers or explanatio
                     timeout=180,
                     env=git_env
                 )
-                
-                print(f"   📝 Push output: {push_result.stdout[:200]}")
-                if push_result.stderr:
-                    print(f"   📝 Push stderr: {push_result.stderr[:200]}")
-                
+
                 if push_result.returncode != 0:
-                    print(f"   ❌ Push FAILED!")
-                    print(f"      Return code: {push_result.returncode}")
-                    print(f"      Full stderr: {push_result.stderr}")
+                    _log(f"❌ Push başarısız: {push_result.stderr[:200]}")
                     raise Exception(f"Failed to push sync branch: {push_result.stderr}")
-                
-                print(f"   ✅ Branch pushed successfully!")
-                
+
+                _log(f"✅ Branch push edildi: {sync_branch_name}")
+
                 # Create PR
-                print(f"\n🔀 Creating Pull Request...")
+                _log(f"🔀 Azure DevOps PR oluşturuluyor: {source_branch} → {target_branch}")
                 pr_title = f"Code Sync: {len(pr_ids)} PR merged"
                 pr_description = f"Automated code sync from {source_branch} to {target_branch}\n\nMerged PRs:\n"
                 for pr_info in merged_prs:
@@ -1996,28 +1999,23 @@ Return ONLY the resolved file content WITHOUT any conflict markers or explanatio
                 }
                 
                 create_pr_url = f"https://dev.azure.com/{self.organization}/{self.project}/_apis/git/repositories/{repository_id}/pullrequests"
-                print(f"   🔄 Calling Azure DevOps API to create PR...")
                 pr_response = await client.post(
                     create_pr_url,
                     headers=self.headers,
                     params={"api-version": self.api_version},
                     json=pr_data
                 )
-                
+
                 if pr_response.status_code != 201:
-                    print(f"   ❌ PR creation FAILED!")
-                    print(f"      Status code: {pr_response.status_code}")
-                    print(f"      Response: {pr_response.text[:500]}")
+                    _log(f"❌ PR oluşturulamadı: {pr_response.status_code} — {pr_response.text[:200]}")
                     raise Exception(f"Failed to create PR: {pr_response.text}")
-                
+
                 pr_result = pr_response.json()
                 pr_id = pr_result.get("pullRequestId")
                 pr_url = f"https://dev.azure.com/{self.organization}/{self.project}/_git/{repository_name}/pullrequest/{pr_id}"
-                
-                print(f"   ✅ PR created successfully!")
-                print(f"   🔗 PR ID: {pr_id}")
-                print(f"   🔗 PR URL: {pr_url}")
-                
+
+                _log(f"✅ PR oluşturuldu: #{pr_id} → {pr_url}")
+
                 created_pr = {
                     "pr_id": pr_id,
                     "pr_url": pr_url,
@@ -2025,12 +2023,7 @@ Return ONLY the resolved file content WITHOUT any conflict markers or explanatio
                     "source_branch": sync_branch_name,
                     "target_branch": target_branch
                 }
-                
-                print(f"\n🎉 Code sync completed successfully!")
-                print(f"   ✅ Synced {len(pr_ids)} PRs")
-                print(f"   ✅ Resolved {len(conflicts)} conflicts using AI")
-                print(f"   ✅ Created PR #{pr_id}")
-                
+
                 return {
                     "status": "success",
                     "message": f"Successfully synced {len(pr_ids)} PRs",

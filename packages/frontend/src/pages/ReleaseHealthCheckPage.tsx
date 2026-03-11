@@ -1337,14 +1337,7 @@ function DevTrackingContent({ productId, versionId, versions }: {
   );
 }
 
-// ─── Approve Dialog (3-step Stepper: Son Kontrol → Paket Oluştur → Yayınla) ──
-
-const PACKAGE_TYPE_LABELS: Record<string, string> = {
-  HELM_CHART: 'HelmChart (.tgz)',
-  DOCKER_IMAGE: 'Docker Image',
-  BINARY: 'Binary / DLL Paketi (.zip)',
-  GIT_ARCHIVE: 'Git Archive',
-};
+// ─── Approve Dialog (2-step Stepper: Son Kontrol → Yayınla) ──
 
 type PackageInput = {
   packageType: string;
@@ -1355,27 +1348,19 @@ type PackageInput = {
   publishedBy?: string;
 };
 
-const WIZARD_STEPS = ['Son Kontrol', 'Paket Oluştur', 'Yayınla'];
+const WIZARD_STEPS = ['Son Kontrol', 'Yayınla'];
 
-function ApproveDialog({ open, onClose, versionLabel, versionStr, healthScore, openPRCount, p0TodoCount, breakingCount, missingNoteCount, serviceCount, onConfirm, isPending, error }: {
-  open: boolean; onClose: () => void; versionLabel: string; versionStr: string; healthScore: number;
+function ApproveDialog({ open, onClose, versionLabel, healthScore, openPRCount, p0TodoCount, breakingCount, missingNoteCount, serviceCount, onConfirm, isPending, error }: {
+  open: boolean; onClose: () => void; versionLabel: string; healthScore: number;
   openPRCount: number; p0TodoCount: number; breakingCount: number; missingNoteCount: number; serviceCount: number;
   onConfirm: (packages: PackageInput[]) => void;
   isPending: boolean; error?: string | null;
 }) {
   const [activeStep, setActiveStep] = useState(0);
-  const [createPackage, setCreatePackage] = useState(false);
-  const [packageType, setPackageType] = useState('HELM_CHART');
-  const [packageName, setPackageName] = useState('');
-  const [artifactUrl, setArtifactUrl] = useState('');
 
   useEffect(() => {
     if (open) {
       setActiveStep(0);
-      setCreatePackage(false);
-      setPackageType('HELM_CHART');
-      setPackageName('');
-      setArtifactUrl('');
     }
   }, [open]);
 
@@ -1391,19 +1376,7 @@ function ApproveDialog({ open, onClose, versionLabel, versionStr, healthScore, o
   const handleBack = () => setActiveStep(s => s - 1);
 
   const handleFinish = () => {
-    const packages: PackageInput[] = [];
-    if (createPackage) {
-      const pkgName = packageName.trim() || `${versionLabel.replace(/\s/g, '-').toLowerCase()}`;
-      packages.push({
-        packageType,
-        name: pkgName,
-        version: versionStr,
-        artifactUrl: artifactUrl.trim() || undefined,
-        description: `Release package for ${versionLabel}`,
-        publishedBy: 'system',
-      });
-    }
-    onConfirm(packages);
+    onConfirm([]);
   };
 
   return (
@@ -1445,66 +1418,22 @@ function ApproveDialog({ open, onClose, versionLabel, versionStr, healthScore, o
                 ⚠️ Sağlık skoru <strong>{healthScore}/100</strong> — ideal koşullar sağlanmamış. Devam etmek sizin sorumluluğunuzdadır.
               </Alert>
             )}
-          </>
-        )}
-
-        {/* Step 1: Paket Oluştur */}
-        {activeStep === 1 && (
-          <>
-            <Typography variant="body2" color="text.secondary" gutterBottom>
-              Müşterilere dağıtılacak bir paket oluşturmak ister misiniz?
-            </Typography>
-            <Box sx={{ display: 'flex', gap: 1, my: 2 }}>
-              <Button variant={createPackage ? 'contained' : 'outlined'} size="small" onClick={() => setCreatePackage(true)}>
-                Evet, Paket Oluştur
-              </Button>
-              <Button variant={!createPackage ? 'contained' : 'outlined'} size="small" color="inherit" onClick={() => setCreatePackage(false)}>
-                Hayır, Sadece Yayınla
-              </Button>
+            <Box sx={{ bgcolor: 'info.50', borderRadius: 1, p: 1.5, mt: 1.5 }}>
+              <Typography variant="body2" fontWeight={600} gutterBottom>📦 Otomatik Paket Oluşturma</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Yayınlama onaylandığında, ürünün artifact tip tanımına göre paketler otomatik oluşturulacak.
+              </Typography>
             </Box>
-            {createPackage && (
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <FormControl size="small" fullWidth>
-                  <InputLabel>Paket Tipi</InputLabel>
-                  <Select value={packageType} label="Paket Tipi" onChange={e => setPackageType(e.target.value)}>
-                    {Object.entries(PACKAGE_TYPE_LABELS).map(([key, label]) => (
-                      <MenuItem key={key} value={key}>{label}</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-                <Box>
-                  <Typography variant="caption" color="text.secondary">Paket adı (boş bırakılırsa otomatik):</Typography>
-                  <input
-                    type="text"
-                    placeholder={`örn: ${versionLabel.replace(/\s/g, '-').toLowerCase()}`}
-                    value={packageName}
-                    onChange={e => setPackageName(e.target.value)}
-                    style={{ width: '100%', padding: '8px 12px', marginTop: 4, border: '1px solid #ccc', borderRadius: 4, fontSize: 14 }}
-                  />
-                </Box>
-                <Box>
-                  <Typography variant="caption" color="text.secondary">Artifact URL (opsiyonel):</Typography>
-                  <input
-                    type="text"
-                    placeholder="https://artifacts.example.com/..."
-                    value={artifactUrl}
-                    onChange={e => setArtifactUrl(e.target.value)}
-                    style={{ width: '100%', padding: '8px 12px', marginTop: 4, border: '1px solid #ccc', borderRadius: 4, fontSize: 14 }}
-                  />
-                </Box>
-              </Box>
-            )}
           </>
         )}
 
-        {/* Step 2: Yayınla */}
-        {activeStep === 2 && (
+        {/* Step 1: Yayınla */}
+        {activeStep === 1 && (
           <>
             <Alert severity="info" sx={{ mb: 2 }}>
               <Typography variant="body2" fontWeight={600}>Son onay</Typography>
               <Typography variant="body2">
                 <strong>{versionLabel}</strong> versiyonu PRODUCTION fazına taşınacak ve release notu yayınlanacak.
-                {createPackage && ` "${packageName || versionLabel.replace(/\s/g, '-').toLowerCase()}" paketi oluşturulacak.`}
               </Typography>
             </Alert>
             <Typography variant="caption" color="text.secondary">
@@ -1647,11 +1576,23 @@ export default function ReleaseHealthCheckPage() {
         versionPackages: packages,
         notesPublished: true,
       }).then(async (releaseRes) => {
-        // Background: snapshot
+        // Background: snapshot — Health Check ekranındaki PR'ları kullan (Azure re-query değil)
         const capturedProductId = selectedProduct;
         const capturedVersionId = selectedVersion;
+        // deltaPRs'i repoName'e göre grupla: { [repoName]: prId[] }
+        const explicitPrsByRepo: Record<string, number[]> = {};
+        for (const pr of deltaPRs) {
+          const repo = pr.repository?.name ?? '';
+          if (!repo) continue;
+          if (!explicitPrsByRepo[repo]) explicitPrsByRepo[repo] = [];
+          explicitPrsByRepo[repo].push(pr.pullRequestId);
+        }
         apiClient
-          .post('/service-release-snapshots', { productId: capturedProductId, productVersionId: capturedVersionId })
+          .post('/service-release-snapshots', {
+            productId: capturedProductId,
+            productVersionId: capturedVersionId,
+            explicitPrsByRepo: Object.keys(explicitPrsByRepo).length > 0 ? explicitPrsByRepo : undefined,
+          })
           .then(r => {
             const snap = r.data.data as { succeeded: string[]; failed: { serviceId: string }[] };
             queryClient.invalidateQueries({ queryKey: ['service-snapshots', capturedProductId] });
@@ -1882,7 +1823,6 @@ export default function ReleaseHealthCheckPage() {
         open={approveOpen}
         onClose={() => setApproveOpen(false)}
         versionLabel={versionLabel}
-        versionStr={selectedVerObj?.version ?? '1.0.0'}
         healthScore={healthScore}
         openPRCount={openPRs.length}
         p0TodoCount={incompleteP0Count}

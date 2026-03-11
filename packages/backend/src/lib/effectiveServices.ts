@@ -9,12 +9,11 @@ export interface EffectiveService {
 
 /**
  * Returns the effective list of services for a CustomerProductMapping (CPM).
- * Logic:
- *   FULL         → all active services of the product
- *   MODULE_GROUP → services whose module belongs to subscribed module groups
- *   MODULE       → services whose moduleId is in subscribedModuleIds
- *   SERVICE      → services directly listed in subscribedServiceIds
- *   (default)    → all active services (same as FULL)
+ * License model (new):
+ *   - If licensedServiceIds is populated → return only those services
+ *   - Else if licensedModuleIds is populated → services in those modules
+ *   - Else if licensedModuleGroupIds is populated → services in those module groups
+ *   - Else → all active services of the product (full license)
  */
 export async function getEffectiveServices(cpmId: string): Promise<EffectiveService[]> {
   const cpm = await prisma.customerProductMapping.findUnique({
@@ -24,19 +23,27 @@ export async function getEffectiveServices(cpmId: string): Promise<EffectiveServ
   if (!cpm) return [];
 
   const productId = cpm.productId;
-  const level = (cpm.subscriptionLevel ?? 'FULL').toUpperCase();
 
-  if (level === 'FULL') {
+  // Service-level license
+  if (cpm.licensedServiceIds.length > 0) {
     return prisma.service.findMany({
-      where: { productId, isActive: true },
+      where: { id: { in: cpm.licensedServiceIds }, isActive: true },
       select: { id: true, name: true, productId: true, moduleId: true },
     });
   }
 
-  if (level === 'MODULE_GROUP') {
-    // Get module IDs belonging to the subscribed module groups
+  // Module-level license
+  if (cpm.licensedModuleIds.length > 0) {
+    return prisma.service.findMany({
+      where: { productId, isActive: true, moduleId: { in: cpm.licensedModuleIds } },
+      select: { id: true, name: true, productId: true, moduleId: true },
+    });
+  }
+
+  // ModuleGroup-level license
+  if (cpm.licensedModuleGroupIds.length > 0) {
     const modules = await prisma.module.findMany({
-      where: { moduleGroupId: { in: cpm.subscribedModuleGroupIds } },
+      where: { moduleGroupId: { in: cpm.licensedModuleGroupIds } },
       select: { id: true },
     });
     const moduleIds = modules.map((m) => m.id);
@@ -46,21 +53,7 @@ export async function getEffectiveServices(cpmId: string): Promise<EffectiveServ
     });
   }
 
-  if (level === 'MODULE') {
-    return prisma.service.findMany({
-      where: { productId, isActive: true, moduleId: { in: cpm.subscribedModuleIds } },
-      select: { id: true, name: true, productId: true, moduleId: true },
-    });
-  }
-
-  if (level === 'SERVICE') {
-    return prisma.service.findMany({
-      where: { id: { in: cpm.subscribedServiceIds }, isActive: true },
-      select: { id: true, name: true, productId: true, moduleId: true },
-    });
-  }
-
-  // Fallback: all services
+  // Full license: all active services
   return prisma.service.findMany({
     where: { productId, isActive: true },
     select: { id: true, name: true, productId: true, moduleId: true },
